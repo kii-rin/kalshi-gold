@@ -1,0 +1,43 @@
+name: Gold bot (test run)
+
+# Runs the bot for up to ~5h50m per run (GitHub's limit is 6h per job).
+# Starts by hand (Actions tab -> Gold bot -> Run workflow) and, while the repo
+# variable BOT_ENABLED is "true", again every 6 hours on weekdays so a full day is covered.
+# To stop: set BOT_ENABLED to false, or Actions -> Gold bot -> "..." -> Disable workflow.
+
+on:
+  workflow_dispatch:
+    inputs:
+      minutes:
+        description: "How many minutes to run (max 350)"
+        default: "350"
+  schedule:
+    - cron: "57 */6 * * 1-5"
+
+concurrency:
+  group: gold-bot
+  cancel-in-progress: false
+
+jobs:
+  run:
+    if: github.event_name == 'workflow_dispatch' || vars.BOT_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 358
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -q -r requirements.txt
+      - name: Run bot
+        env:
+          KALSHI_API_KEY_ID: ${{ secrets.KALSHI_API_KEY_ID }}
+          KALSHI_PRIVATE_KEY: ${{ secrets.KALSHI_PRIVATE_KEY }}
+          LIVE: ${{ vars.LIVE || 'true' }}
+          DOLLARS_PER_TRADE: ${{ vars.DOLLARS_PER_TRADE || '1' }}
+          DAILY_LIMIT: ${{ vars.DAILY_LIMIT || '1' }}
+          BAND_LOW: ${{ vars.BAND_LOW || '88' }}
+          BAND_HIGH: ${{ vars.BAND_HIGH || '97' }}
+          NTFY_TOPIC: ${{ vars.NTFY_TOPIC }}
+          RUN_MINUTES: ${{ github.event.inputs.minutes || '350' }}
+        run: python bot.py

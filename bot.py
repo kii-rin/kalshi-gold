@@ -44,6 +44,7 @@ class Settings:
         self.key_id = e("KALSHI_API_KEY_ID")
         self.private_key = (e("KALSHI_PRIVATE_KEY") or "").replace("\\n", "\n")
         self.ntfy_topic = e("NTFY_TOPIC")                 # optional phone alerts via ntfy.sh
+        self.run_minutes = float(e("RUN_MINUTES", "0"))   # stop after this long (0 = run forever)
         if not (0 < self.low <= self.high < 100):
             raise ValueError("BAND_LOW/BAND_HIGH must be like 88 and 97")
         if self.dollars < 0.01:
@@ -112,6 +113,19 @@ class Kalshi:
 
     def open_markets(self, series):
         return self.request("GET", "/markets", {"series_ticker": series, "status": "open", "limit": 100}).get("markets", [])
+
+    def fills_since(self, ts):
+        out, cursor = [], None
+        for _ in range(20):
+            p = {"min_ts": int(ts), "limit": 200}
+            if cursor:
+                p["cursor"] = cursor
+            d = self.request("GET", "/portfolio/fills", p, auth=True)
+            out += d.get("fills", [])
+            cursor = d.get("cursor")
+            if not cursor or not d.get("fills"):
+                break
+        return out
 
     def balance(self):
         return self.request("GET", "/portfolio/balance", auth=True)
@@ -206,6 +220,23 @@ class Bot:
             except Exception as e:
                 log(f"(phone alert failed: {e})")
 
+    def load_today(self):
+        """Count today's buys already on Kalshi, so restarts don't reset the daily limit or re-buy."""
+        start = datetime.fromtimestamp(self.clock(), ET).replace(hour=0, minute=0, second=0, microsecond=0)
+        self.roll_day()
+        spent = 0.0
+        for f in self.k.fills_since(start.timestamp()):
+            if f.get("action", "buy") != "buy" or not str(f.get("ticker", "")).startswith(self.s.series):
+                continue
+            n = float(f.get("count_fp") or f.get("count") or 0)
+            side = f.get("side", "yes")
+            px = f.get(f"{side}_price_dollars")
+            px = float(px) if px not in (None, "") else float(f.get(f"{side}_price") or 0) / 100
+            spent += n * px
+            self.done.add(f["ticker"])
+        self.spent = spent
+        log(f"Already spent today on {self.s.series}: ${spent:.2f} ({len(self.done)} markets)")
+
     def roll_day(self):
         today = datetime.fromtimestamp(self.clock(), ET).date()
         if today != self.day:
@@ -286,12 +317,23 @@ class Bot:
                 if s.live:
                     raise SystemExit(f"Kalshi key check failed: {e}")
                 log(f"(Key check failed, fine in paper mode: {e})")
+        if s.live:
+            try:
+                self.load_today()
+            except Exception as e:
+                raise SystemExit(f"Couldn't read today's trades from Kalshi: {e}")
+        stop_at = self.clock() + s.run_minutes * 60 if s.run_minutes > 0 else None
         while True:
+            if stop_at and self.clock() >= stop_at:
+                log(f"Ran {s.run_minutes:g} minutes, stopping. Spent today: ${self.spent:.2f}")
+                return
             try:
                 wait = self.step()
             except Exception as e:
                 log(f"error: {e} - retrying in 10s")
                 wait = 10
+            if stop_at:
+                wait = min(wait, max(0.0, stop_at - self.clock()))
             self.sleep(max(0.5, wait))
 
 

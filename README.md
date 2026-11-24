@@ -6,7 +6,24 @@ Runs all day on a cloud server, so no PC needed.
 
 It starts in **paper mode**: it only logs what it *would* buy. Nothing real happens until you set `LIVE=true`.
 
-## Set up from your phone
+## Quick test on GitHub ($1 a day)
+
+For a short test (a day or so), it can run on GitHub Actions. The defaults there are **$1 per trade and a $1 daily limit**, so about one trade a day, for real.
+
+1. In this repo, go to **Settings → Secrets and variables → Actions**.
+2. Under **Secrets**, add `KALSHI_API_KEY_ID` and `KALSHI_PRIVATE_KEY` (the whole key text).
+3. Go to **Actions → Gold bot (test run) → Run workflow**. It runs for about 6 hours. Tap the run to watch its log.
+4. To keep it going all day, add the repo **variable** `BOT_ENABLED` = `true`. It then restarts every 6 hours on weekdays. Set it to `false` when you're done.
+
+Optional **variables**:
+- `LIVE` = `false` for paper mode
+- `DOLLARS_PER_TRADE` / `DAILY_LIMIT` to bet more
+- `BAND_LOW` / `BAND_HIGH` to change the price band
+- `NTFY_TOPIC` for phone alerts
+
+Restarts don't reset the daily limit: the bot reads today's buys from Kalshi when it starts. A private repo gets 2,000 free Actions minutes a month, and a full day uses about 1,440. GitHub Actions is meant for testing, so for running long-term, use Railway (below).
+
+## Set up from your phone (Railway, for running long-term)
 
 ### 1. Kalshi API key
 On kalshi.com, go to **Account & security → API keys → Create key**. Keep two things:

@@ -42,8 +42,13 @@ class FakeKalshi:
     def open_markets(self, series):
         return self.markets
 
+    fills = []
+
     def balance(self):
         return {"balance": 5000}
+
+    def fills_since(self, ts):
+        return self.fills
 
     def buy(self, ticker, side, count, limit):
         self.orders.append((ticker, side, count, limit))
@@ -154,3 +159,32 @@ def test_bad_settings():
         settings(BAND_LOW=97, BAND_HIGH=88)
     with pytest.raises(ValueError):
         bot.Settings(lambda n, d=None: {"LIVE": "true"}.get(n, d))   # live without a key
+
+
+def test_restart_counts_todays_fills_and_skips_bought_markets():
+    k = FakeKalshi([mkt("KXGOLD15M-A", 100, yes_ask=93, no_ask=8), mkt("KXGOLD15M-B", 100, yes_ask=93, no_ask=8)])
+    k.fills = [{"ticker": "KXGOLD15M-A", "side": "yes", "action": "buy", "count_fp": "1.00", "yes_price_dollars": "0.9300"},
+               {"ticker": "KXBTC15M-Z", "side": "no", "action": "buy", "count_fp": "5.00", "no_price_dollars": "0.9000"}]
+    b = bot.Bot(settings(LIVE="true", KALSHI_API_KEY_ID="x", KALSHI_PRIVATE_KEY="y", DAILY_LIMIT=1, DOLLARS_PER_TRADE=1),
+                k, clock=lambda: NOW)
+    b.load_today()
+    assert b.spent == pytest.approx(0.93) and "KXGOLD15M-A" in b.done
+    b.step()
+    assert k.orders == []            # A already bought, B would pass the $1 limit
+
+
+def test_run_minutes_stops():
+    t = [NOW]
+    k = FakeKalshi([])
+    b = bot.Bot(settings(RUN_MINUTES=5), k, clock=lambda: t[0], sleep=lambda s: t.__setitem__(0, t[0] + s))
+    b.run()
+    assert t[0] - NOW == pytest.approx(300)
+
+
+def test_one_dollar_a_day_allows_one_trade():
+    ms = [mkt(f"M{i}", 100, yes_ask=93, no_ask=8) for i in range(3)]
+    k = FakeKalshi(ms)
+    b = bot.Bot(settings(LIVE="true", KALSHI_API_KEY_ID="x", KALSHI_PRIVATE_KEY="y", DAILY_LIMIT=1, DOLLARS_PER_TRADE=1),
+                k, clock=lambda: NOW)
+    b.step()
+    assert len(k.orders) == 1 and k.orders[0][2] == 1
