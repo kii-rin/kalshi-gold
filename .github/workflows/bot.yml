@@ -35,7 +35,7 @@ jobs:
           KALSHI_PRIVATE_KEY: ${{ secrets.KALSHI_PRIVATE_KEY }}
           LIVE: ${{ vars.LIVE || 'true' }}
           DOLLARS_PER_TRADE: ${{ vars.DOLLARS_PER_TRADE || '1' }}
-          DAILY_LIMIT: ${{ vars.DAILY_LIMIT || '1' }}
+          DAILY_LIMIT: ${{ vars.DAILY_LIMIT || '0' }}
           BAND_LOW: ${{ vars.BAND_LOW || '88' }}
           BAND_HIGH: ${{ vars.BAND_HIGH || '97' }}
           NTFY_TOPIC: ${{ vars.NTFY_TOPIC }}
