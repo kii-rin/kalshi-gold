@@ -70,7 +70,10 @@ class Kalshi:
     def sign(self, method, path, ts_ms):
         from cryptography.hazmat.primitives import hashes
         from cryptography.hazmat.primitives.asymmetric import padding
+        from cryptography.hazmat.primitives.asymmetric import ed25519
         msg = f"{ts_ms}{method}{urllib.parse.urlparse(self.base).path}{path}".encode()
+        if isinstance(self._key, ed25519.Ed25519PrivateKey):   # Kalshi's default key type: signs the message itself
+            return base64.b64encode(self._key.sign(msg)).decode()
         sig = self._key.sign(msg, padding.PSS(mgf=padding.MGF1(hashes.SHA256()),
                                               salt_length=padding.PSS.DIGEST_LENGTH), hashes.SHA256())
         return base64.b64encode(sig).decode()
