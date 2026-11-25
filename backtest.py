@@ -223,12 +223,18 @@ def simulate(ms, lo, hi, window, steady=False, dollars=1.0):
     return trades
 
 
-def wilson_low(w, n, z=1.96):
+def wilson(w, n, z=1.96):
     if not n:
-        return 0.0
+        return 0.0, 1.0
     p = w / n
     d = 1 + z * z / n
-    return ((p + z * z / (2 * n)) - z * math.sqrt(p * (1 - p) / n + z * z / (4 * n * n))) / d
+    c = (p + z * z / (2 * n)) / d
+    h = z * math.sqrt(p * (1 - p) / n + z * z / (4 * n * n)) / d
+    return c - h, c + h
+
+
+def wilson_low(w, n):
+    return wilson(w, n)[0]
 
 
 def stats(tr):
@@ -243,9 +249,9 @@ def stats(tr):
         peak = max(peak, eq)
         dd = max(dd, peak - eq)
     be = cost / pay if pay else 0
-    lo = wilson_low(w, n)
+    lo, hi = wilson(w, n)
     verdict = ("too few trades" if n < 50 else "edge looks real" if lo > be else
-               "loses money" if n and w / n < be else "can't tell yet")
+               "loses money" if hi < be else "below break-even, not certain" if w / n < be else "can't tell yet")
     return {"n": n, "w": w, "wr": w / n if n else 0, "be": be, "low": lo, "pnl": pnl / 100,
             "per": pnl / n if n else 0, "dd": dd / 100, "verdict": verdict}
 
