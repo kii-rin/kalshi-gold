@@ -41,6 +41,7 @@ class Settings:
         self.slip = float(e("SLIPPAGE_CENTS", "1"))       # may pay up to this much above the ask seen
         self.poll = float(e("POLL_SECONDS", "3"))
         self.max_tries = int(e("MAX_TRIES_PER_MARKET", "3"))
+        self.confirm_checks = int(e("CONFIRM_CHECKS", "2"))      # in band this many checks in a row before buying
         self.key_id = e("KALSHI_API_KEY_ID")
         self.private_key = (e("KALSHI_PRIVATE_KEY") or "").replace("\\n", "\n")
         self.ntfy_topic = e("NTFY_TOPIC")                 # optional phone alerts via ntfy.sh
@@ -364,6 +365,7 @@ class Bot:
         self.done, self.tries, self.logged = set(), {}, set()
         self.day, self.spent = None, 0.0
         self.pending = {}            # ticker -> trade waiting for the market to settle
+        self.streak = {}             # ticker -> (side, checks in a row in band, last check time)
         self.tradelog = TradeLog(s.github_token, s.github_repo) if (s.github_token and s.github_repo) else None
         self.day_pnl, self.day_w, self.day_l = 0.0, 0, 0
 
@@ -423,6 +425,27 @@ class Bot:
                     next_wake = min(next_wake, max(1.0, secs_left - self.s.start_seconds))
                 continue
             next_wake = min(next_wake, self.s.poll)
+            if action == "buy":
+                # steady-price check: same favorite in the band on consecutive checks (a few seconds apart)
+                side0, n0, t0 = self.streak.get(t, (None, 0, 0))
+                n = n0 + 1 if side0 == d["side"] and now - t0 <= self.s.poll * 4 else 1
+                self.streak[t] = (d["side"], n, now)
+                if n < self.s.confirm_checks:
+                    continue
+                # fresh-price check: re-read this market right before ordering
+                try:
+                    m = {**m, **self.k.market(t)}
+                    action, d = decide(m, self.s, self.clock())
+                except Exception as e:
+                    action, d = "skip", {"why": f"couldn't re-check price ({e})", "secs_left": secs_left}
+                if action != "buy":
+                    self.streak.pop(t, None)
+                    if action == "skip":
+                        d["why"] = "price moved just before ordering: " + d.get("why", "")
+            else:
+                self.streak.pop(t, None)
+            if action == "wait":
+                continue
             if action == "skip":
                 key = (t, d.get("why", "")[:20])
                 if key not in self.logged:
@@ -454,6 +477,9 @@ class Bot:
                     self.done.add(t)
                 continue
             filled, spent = fill_info(order, d["price"])
+            if filled > 0 and spent / filled * 100 < self.s.low - 1:
+                log(f"{t}: note - filled at {spent / filled * 100:.0f}c, below the band: the price moved "
+                    f"in the moment between checking and ordering")
             if filled > 0:
                 self.done.add(t)
                 self.spent += spent

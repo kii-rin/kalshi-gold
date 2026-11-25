@@ -19,7 +19,7 @@ def iso(ts):
 
 
 def settings(**kw):
-    vals = {"LIVE": "false", "DAILY_LIMIT": "20"}
+    vals = {"LIVE": "false", "DAILY_LIMIT": "20", "CONFIRM_CHECKS": "1"}
     vals.update({k: str(v) for k, v in kw.items()})
     return bot.Settings(lambda n, d=None: vals.get(n, d))
 
@@ -41,6 +41,9 @@ class FakeKalshi:
 
     def open_markets(self, series):
         return self.markets
+
+    def market(self, ticker):
+        return next((m for m in self.markets if m["ticker"] == ticker), {"ticker": ticker})
 
     fills = []
 
@@ -312,3 +315,39 @@ def test_trades_md_page():
     assert md.index("8:00 PM | NO") < md.index("7:45 PM | YES")          # newest first
     assert "## Problems" in md and "400 bad price" in md
     assert len(bot.parse_csv(gh.files["trades.csv"][0])) == 3
+
+
+def test_needs_two_steady_checks_and_fresh_price():
+    k = FakeKalshi([mkt("A", 100, yes_ask=93, no_ask=8)])
+    t = [NOW]
+    b = bot.Bot(settings(LIVE="true", KALSHI_API_KEY_ID="x", KALSHI_PRIVATE_KEY="y", CONFIRM_CHECKS=2), k,
+                clock=lambda: t[0])
+    b.step()
+    assert k.orders == []                      # first sighting: wait for a second check
+    t[0] += 3
+    b.step()
+    assert k.orders == [("A", "yes", 2, 94)]  # steady -> buy
+
+
+def test_skips_when_price_swings_between_checks():
+    k = FakeKalshi([mkt("A", 100, yes_ask=4, no_ask=96)])
+    t = [NOW]
+    b = bot.Bot(settings(LIVE="true", KALSHI_API_KEY_ID="x", KALSHI_PRIVATE_KEY="y", CONFIRM_CHECKS=2), k,
+                clock=lambda: t[0])
+    b.step()                                   # NO 96 in band
+    k.markets = [mkt("A", 97, yes_ask=18, no_ask=83)]
+    t[0] += 3
+    b.step()                                   # swung to NO 83 -> streak broken
+    assert k.orders == []
+
+
+def test_fresh_recheck_blocks_stale_quote():
+    k = FakeKalshi([mkt("A", 100, yes_ask=4, no_ask=96)])
+    k.market = lambda tk: mkt("A", 99, yes_ask=18, no_ask=83)   # live price already moved
+    t = [NOW]
+    b = bot.Bot(settings(LIVE="true", KALSHI_API_KEY_ID="x", KALSHI_PRIVATE_KEY="y", CONFIRM_CHECKS=2), k,
+                clock=lambda: t[0])
+    b.step()
+    t[0] += 3
+    b.step()
+    assert k.orders == []
