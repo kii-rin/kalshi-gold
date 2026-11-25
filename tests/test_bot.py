@@ -227,3 +227,42 @@ def test_ed25519_key_signature():
     h = seen["headers"]
     key.public_key().verify(base64.b64decode(h["KALSHI-ACCESS-SIGNATURE"]),
                             f"{h['KALSHI-ACCESS-TIMESTAMP']}GET/trade-api/v2/portfolio/balance".encode())
+
+
+def test_alerts_on_buy_and_first_failure(monkeypatch):
+    sent = []
+    k = FakeKalshi([mkt("A", 100, yes_ask=93, no_ask=8)])
+    b = bot.Bot(settings(LIVE="true", KALSHI_API_KEY_ID="x", KALSHI_PRIVATE_KEY="y"), k, clock=lambda: NOW)
+    monkeypatch.setattr(b, "notify", lambda msg, title=None: sent.append(title))
+    b.step()
+    assert sent == ["Bought YES A for $1.90"]
+
+    class Broken(FakeKalshi):
+        def buy(self, *a):
+            raise RuntimeError("410 gone")
+    k2 = Broken([mkt("B", 100, yes_ask=93, no_ask=8)])
+    b2 = bot.Bot(settings(LIVE="true", KALSHI_API_KEY_ID="x", KALSHI_PRIVATE_KEY="y"), k2, clock=lambda: NOW)
+    sent.clear()
+    monkeypatch.setattr(b2, "notify", lambda msg, title=None: sent.append(title))
+    for _ in range(3):
+        b2.step()
+    assert sent == ["Order FAILED on B"]          # one alert, not one per retry
+
+
+def test_github_issue_alert(monkeypatch):
+    calls = []
+
+    class Resp:
+        def close(self):
+            pass
+
+    def fake_urlopen(req, timeout=10):
+        calls.append((req.full_url, json.loads(req.data), req.headers))
+        return Resp()
+
+    monkeypatch.setattr(bot.urllib.request, "urlopen", fake_urlopen)
+    b = bot.Bot(settings(GITHUB_TOKEN="tok", GITHUB_REPOSITORY="kii-rin/kalshi-gold"), FakeKalshi([]))
+    b.notify("BOUGHT X", title="Bought YES X for $0.95")
+    url, body, headers = calls[0]
+    assert url == "https://api.github.com/repos/kii-rin/kalshi-gold/issues"
+    assert body == {"title": "Bought YES X for $0.95", "body": "BOUGHT X"} and headers["Authorization"] == "Bearer tok"

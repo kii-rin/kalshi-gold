@@ -18,6 +18,10 @@ concurrency:
   group: gold-bot
   cancel-in-progress: false
 
+permissions:
+  contents: read
+  issues: write     # the bot opens an issue for each purchase -> GitHub notifies you
+
 jobs:
   run:
     if: github.event_name == 'workflow_dispatch' || vars.BOT_ENABLED == 'true'
@@ -39,5 +43,6 @@ jobs:
           BAND_LOW: ${{ vars.BAND_LOW || '88' }}
           BAND_HIGH: ${{ vars.BAND_HIGH || '97' }}
           NTFY_TOPIC: ${{ vars.NTFY_TOPIC }}
+          GITHUB_TOKEN: ${{ github.token }}
           RUN_MINUTES: ${{ github.event.inputs.minutes || '350' }}
         run: python bot.py

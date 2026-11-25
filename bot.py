@@ -44,6 +44,8 @@ class Settings:
         self.key_id = e("KALSHI_API_KEY_ID")
         self.private_key = (e("KALSHI_PRIVATE_KEY") or "").replace("\\n", "\n")
         self.ntfy_topic = e("NTFY_TOPIC")                 # optional phone alerts via ntfy.sh
+        self.github_token = e("GITHUB_TOKEN")             # set by GitHub Actions: alerts as GitHub issues
+        self.github_repo = e("GITHUB_REPOSITORY")
         self.run_minutes = float(e("RUN_MINUTES", "0"))   # stop after this long (0 = run forever)
         if not (0 < self.low <= self.high < 100):
             raise ValueError("BAND_LOW/BAND_HIGH must be like 88 and 97")
@@ -231,8 +233,18 @@ class Bot:
         self.done, self.tries, self.logged = set(), {}, set()
         self.day, self.spent = None, 0.0
 
-    def notify(self, msg):
+    def notify(self, msg, title=None):
         log(msg)
+        if self.s.github_token and self.s.github_repo:
+            try:
+                body = json.dumps({"title": (title or msg)[:120], "body": msg}).encode()
+                req = urllib.request.Request(f"https://api.github.com/repos/{self.s.github_repo}/issues", data=body,
+                                             method="POST", headers={"Authorization": f"Bearer {self.s.github_token}",
+                                                                     "Accept": "application/vnd.github+json",
+                                                                     "Content-Type": "application/json"})
+                urllib.request.urlopen(req, timeout=10).close()
+            except Exception as e:
+                log(f"(GitHub alert failed: {e})")
         if self.s.ntfy_topic:
             try:
                 req = urllib.request.Request(f"https://ntfy.sh/{self.s.ntfy_topic}", data=msg.encode(), method="POST")
@@ -304,7 +316,10 @@ class Bot:
             try:
                 order = self.k.buy(t, d["side"], d["count"], d["limit"])
             except RuntimeError as e:
-                log(f"{t}: order failed - {e}")
+                if self.tries[t] == 1:
+                    self.notify(f"{t}: order failed - {e}", title=f"Order FAILED on {t}")
+                else:
+                    log(f"{t}: order failed - {e}")
                 if self.tries[t] >= self.s.max_tries:
                     self.done.add(t)
                 continue
@@ -313,7 +328,8 @@ class Bot:
                 self.done.add(t)
                 self.spent += spent
                 self.notify(f"BOUGHT {t}: {d['side'].upper()} {filled:g} contracts for ${spent:.2f} "
-                            f"(saw {d['price']:g}c, {int(secs_left)}s left). Today: ${self.spent:.2f}")
+                            f"(saw {d['price']:g}c, {int(secs_left)}s left). Spent today: ${self.spent:.2f}",
+                            title=f"Bought {d['side'].upper()} {t} for ${spent:.2f}")
             else:
                 log(f"{t}: not filled (try {self.tries[t]}/{self.s.max_tries}) - {what}")
                 if self.tries[t] >= self.s.max_tries:
