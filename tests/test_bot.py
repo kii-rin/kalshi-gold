@@ -229,24 +229,52 @@ def test_ed25519_key_signature():
                             f"{h['KALSHI-ACCESS-TIMESTAMP']}GET/trade-api/v2/portfolio/balance".encode())
 
 
-def test_alerts_on_buy_and_first_failure(monkeypatch):
+def test_alert_when_trade_settles_not_when_bought(monkeypatch):
     sent = []
+    t = [NOW]
     k = FakeKalshi([mkt("A", 100, yes_ask=93, no_ask=8)])
-    b = bot.Bot(settings(LIVE="true", KALSHI_API_KEY_ID="x", KALSHI_PRIVATE_KEY="y"), k, clock=lambda: NOW)
+    k.results = {}
+    k.market = lambda tk: {"ticker": tk, "result": k.results.get(tk, "")}
+    b = bot.Bot(settings(LIVE="true", KALSHI_API_KEY_ID="x", KALSHI_PRIVATE_KEY="y"), k, clock=lambda: t[0])
+    monkeypatch.setattr(b, "notify", lambda msg, title=None: sent.append((title, msg)))
+    b.step()
+    assert sent == [] and "A" in b.pending            # bought, no alert yet
+    t[0] = NOW + 130
+    assert b.step() <= 30 and sent == []             # closed but not settled yet: keep checking
+    k.results["A"] = "yes"
+    k.markets = []
+    b.step()
+    title, msg = sent[0]
+    assert title == "WON +$0.10 - YES at 95c (today 1W/0L, +$0.10)"
+    assert "settled YES" in msg and "Profit +$0.10" in msg and not b.pending
+
+
+def test_loss_alert_and_daily_tally(monkeypatch):
+    sent = []
+    t = [NOW]
+    k = FakeKalshi([mkt("A", 100, yes_ask=6, no_ask=95)])
+    k.market = lambda tk: {"result": "yes"}
+    b = bot.Bot(settings(LIVE="true", KALSHI_API_KEY_ID="x", KALSHI_PRIVATE_KEY="y"), k, clock=lambda: t[0])
     monkeypatch.setattr(b, "notify", lambda msg, title=None: sent.append(title))
     b.step()
-    assert sent == ["Bought YES A for $1.90"]
+    t[0] = NOW + 130
+    k.markets = []
+    b.step()
+    assert sent == ["LOST -$1.94 - NO at 97c (today 0W/1L, -$1.94)"]
+
+
+def test_first_failure_alerts_once(monkeypatch):
+    sent = []
 
     class Broken(FakeKalshi):
         def buy(self, *a):
             raise RuntimeError("410 gone")
     k2 = Broken([mkt("B", 100, yes_ask=93, no_ask=8)])
     b2 = bot.Bot(settings(LIVE="true", KALSHI_API_KEY_ID="x", KALSHI_PRIVATE_KEY="y"), k2, clock=lambda: NOW)
-    sent.clear()
     monkeypatch.setattr(b2, "notify", lambda msg, title=None: sent.append(title))
     for _ in range(3):
         b2.step()
-    assert sent == ["Order FAILED on B"]          # one alert, not one per retry
+    assert sent == ["Order FAILED on B"]
 
 
 def test_github_issue_alert(monkeypatch):

@@ -21,6 +21,8 @@ Optional **variables**:
 - `BAND_LOW` / `BAND_HIGH` to change the price band
 - `NTFY_TOPIC` for phone alerts
 
+**Notifications:** when each trade settles, the bot opens a GitHub issue such as "WON +$0.06 - NO at 94c (today 3W/0L, +$0.18)" (or LOST), plus one if an order fails. To get these on your phone, Watch the repo with All activity.
+
 Restarts don't reset the daily limit: the bot reads today's buys from Kalshi when it starts. A private repo gets 2,000 free Actions minutes a month, and a full day uses about 1,440. GitHub Actions is meant for testing, so for running long-term, use Railway (below).
 
 ## Set up from your phone (Railway, for running long-term)

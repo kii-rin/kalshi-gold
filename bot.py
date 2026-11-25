@@ -132,6 +132,9 @@ class Kalshi:
                 break
         return out
 
+    def market(self, ticker):
+        return self.request("GET", f"/markets/{ticker}").get("market", {})
+
     def balance(self):
         return self.request("GET", "/portfolio/balance", auth=True)
 
@@ -232,6 +235,8 @@ class Bot:
         self.s, self.k, self.clock, self.sleep = s, kalshi, clock, sleep
         self.done, self.tries, self.logged = set(), {}, set()
         self.day, self.spent = None, 0.0
+        self.pending = {}            # ticker -> trade waiting for the market to settle
+        self.day_pnl, self.day_w, self.day_l = 0.0, 0, 0
 
     def notify(self, msg, title=None):
         log(msg)
@@ -275,6 +280,7 @@ class Bot:
             if self.day is not None:
                 log(f"New day. Spent ${self.spent:.2f} yesterday.")
             self.day, self.spent = today, 0.0
+            self.day_pnl, self.day_w, self.day_l = 0.0, 0, 0
 
     def step(self):
         """One pass. Returns how long to sleep before the next pass."""
@@ -327,16 +333,55 @@ class Bot:
             if filled > 0:
                 self.done.add(t)
                 self.spent += spent
-                self.notify(f"BOUGHT {t}: {d['side'].upper()} {filled:g} contracts for ${spent:.2f} "
-                            f"(saw {d['price']:g}c, {int(secs_left)}s left). Spent today: ${self.spent:.2f}",
-                            title=f"Bought {d['side'].upper()} {t} for ${spent:.2f}")
+                log(f"BOUGHT {t}: {d['side'].upper()} {filled:g} contracts for ${spent:.2f} "
+                    f"(saw {d['price']:g}c, {int(secs_left)}s left)")
+                self.pending[t] = {"side": d["side"], "n": filled, "cost": spent,
+                                   "close": parse_ts(m["close_time"]), "checks": 0}
             else:
                 log(f"{t}: not filled (try {self.tries[t]}/{self.s.max_tries}) - {what}")
                 if self.tries[t] >= self.s.max_tries:
                     self.done.add(t)
+        if self.pending:
+            self.check_settled()
+            if self.pending:
+                next_wake = min(next_wake, 30.0)
         if len(self.done) > 500:
             self.done = set(list(self.done)[-200:])
         return next_wake
+
+    def check_settled(self):
+        """Send one alert per finished trade: price paid, won or lost, profit."""
+        now = self.clock()
+        for t, p in list(self.pending.items()):
+            if now < p["close"] + 20:
+                continue
+            p["checks"] += 1
+            try:
+                m = self.k.market(t)
+            except Exception as e:
+                log(f"{t}: couldn't check result yet ({e})")
+                continue
+            res = (m.get("result") or "").lower()
+            if res not in ("yes", "no"):
+                if p["checks"] >= 60:           # ~30 min with no result: stop waiting
+                    self.notify(f"{t}: no result from Kalshi after 30 min. Check the Kalshi app.",
+                                title=f"No result yet for {t}")
+                    del self.pending[t]
+                continue
+            won = res == p["side"]
+            payout = p["n"] * 1.0 if won else 0.0
+            pnl = payout - p["cost"]
+            self.day_pnl += pnl
+            self.day_w += won
+            self.day_l += not won
+            each = p["cost"] / p["n"] * 100 if p["n"] else 0
+            sign = "+" if pnl >= 0 else "-"
+            title = (f"{'WON' if won else 'LOST'} {sign}${abs(pnl):.2f} - {p['side'].upper()} at {each:.0f}c "
+                     f"(today {self.day_w}W/{self.day_l}L, {'+' if self.day_pnl >= 0 else '-'}${abs(self.day_pnl):.2f})")
+            self.notify(f"{t}: bought {p['side'].upper()} {p['n']:g} contract(s) at {each:.1f}c each "
+                        f"(${p['cost']:.2f} with fees). Market settled {res.upper()}. "
+                        f"{'Paid out' if won else 'Paid'} ${payout:.2f}. Profit {sign}${abs(pnl):.2f}.", title=title)
+            del self.pending[t]
 
     def run(self):
         s = self.s
@@ -361,6 +406,10 @@ class Bot:
         stop_at = self.clock() + s.run_minutes * 60 if s.run_minutes > 0 else None
         while True:
             if stop_at and self.clock() >= stop_at:
+                if self.pending and self.clock() < stop_at + 600:
+                    self.check_settled()
+                    self.sleep(30)
+                    continue
                 log(f"Ran {s.run_minutes:g} minutes, stopping. Spent today: ${self.spent:.2f}")
                 return
             try:
