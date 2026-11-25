@@ -74,3 +74,11 @@ def test_one_dollar_buys_one_contract_and_fee():
     m = {"ticker": "T", "close": C, "result": "yes", "q": [None, [92, 93], None, None]}
     t = bt.simulate([m], 88, 97, 3)[0]
     assert t["n"] == 1 and t["cost"] == 94 and t["pnl"] == 6
+
+
+def test_full_minutes():
+    close = C
+    cs = [{"end_period_ts": close - 60 * k, "yes_bid": {"close_dollars": "0.9000"}, "yes_ask": {"close_dollars": "0.9100"},
+           "volume_fp": "12.50"} for k in range(0, 17)]
+    got = bt.minutes_from(cs, close)
+    assert got[0] == [15, 90.0, 91.0, 12.5] and got[-1][0] == 1 and len(got) == 15

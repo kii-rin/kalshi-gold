@@ -118,6 +118,20 @@ def list_markets(api, series, start, end):
     return sorted(found.values(), key=lambda m: m["close"])
 
 
+FULL = False   # --full: also keep every minute of the market (for model training)
+
+
+def minutes_from(candles, close):
+    """[[minutes_left, yes_bid, yes_ask, volume], ...] for each 1-minute candle of the market (15..1 left)."""
+    out = []
+    for c in candles or []:
+        k = round((close - int(c["end_period_ts"])) / 60)
+        if 1 <= k <= 15:
+            v = c.get("volume_fp", c.get("volume"))
+            out.append([k, cents(c.get("yes_bid")), cents(c.get("yes_ask")), float(v) if v not in (None, "") else 0.0])
+    return sorted(out, reverse=True)
+
+
 def quotes_from(candles, close):
     cs = sorted((int(c["end_period_ts"]), cents(c.get("yes_bid")), cents(c.get("yes_ask"))) for c in candles or [])
     out = []
@@ -141,7 +155,8 @@ def fetch_quotes(api, series, ms, cutoff):
         g = live[i:i + 100]
         try:
             d = api.get("/markets/candlesticks", {"market_tickers": ",".join(m["ticker"] for m in g),
-                                                  "start_ts": g[0]["close"] - 360, "end_ts": g[-1]["close"],
+                                                  "start_ts": g[0]["close"] - (960 if FULL else 360),
+                                                  "end_ts": g[-1]["close"],
                                                   "period_interval": 1})
             by = {e.get("market_ticker") or e.get("ticker"): e.get("candlesticks") for e in d.get("markets", [])}
         except urllib.error.HTTPError as e:
@@ -150,20 +165,26 @@ def fetch_quotes(api, series, ms, cutoff):
         for m in g:
             if m["ticker"] in by:
                 m["q"] = quotes_from(by[m["ticker"]], m["close"])
+                if FULL:
+                    m["c"] = minutes_from(by[m["ticker"]], m["close"])
             else:
                 old.append(m)
         print(f"  live prices: {min(i + 100, len(live))}/{len(live)}")
     for j, m in enumerate(old, 1):
-        p = {"start_ts": m["close"] - 360, "end_ts": m["close"], "period_interval": 1}
+        p = {"start_ts": m["close"] - (960 if FULL else 360), "end_ts": m["close"], "period_interval": 1}
         d = None
-        for path in (f"/historical/markets/{m['ticker']}/candlesticks",
-                     f"/series/{series}/markets/{m['ticker']}/candlesticks"):
+        paths = [f"/historical/markets/{m['ticker']}/candlesticks", f"/series/{series}/markets/{m['ticker']}/candlesticks"]
+        if m["close"] >= cutoff:
+            paths.reverse()
+        for path in paths:
             try:
                 d = api.get(path, p)
                 break
             except urllib.error.HTTPError:
                 continue
         m["q"] = quotes_from((d or {}).get("candlesticks"), m["close"])
+        if FULL:
+            m["c"] = minutes_from((d or {}).get("candlesticks"), m["close"])
         if j % 200 == 0 or j == len(old):
             print(f"  archived prices: {j}/{len(old)} ({api.calls} requests)")
 
@@ -319,11 +340,14 @@ def main(argv=None):
     ap.add_argument("--start", default="2026-08-01", help="YYYY-MM-DD (Eastern)")
     ap.add_argument("--end", default="", help="YYYY-MM-DD (Eastern), default now")
     ap.add_argument("--offline", action="store_true", help="use saved data only")
+    ap.add_argument("--full", action="store_true", help="keep every minute of each market (data/<series>-full.json.gz)")
     a = ap.parse_args(argv)
+    global FULL
+    FULL = a.full
     start = int(datetime.strptime(a.start, "%Y-%m-%d").replace(tzinfo=ET).timestamp())
     end = (int((datetime.strptime(a.end, "%Y-%m-%d").replace(tzinfo=ET) + timedelta(days=1)).timestamp())
            if a.end else int(time.time()))
-    path = os.path.join(HERE, "data", f"{a.series}.json.gz")
+    path = os.path.join(HERE, "data", f"{a.series}{'-full' if a.full else ''}.json.gz")
     data = load_data(path)
     api = Api()
     if not a.offline:
@@ -333,7 +357,8 @@ def main(argv=None):
             cutoff = parse_ts(api.get("/historical/cutoff").get("market_settled_ts"))
         except Exception:
             cutoff = end - 60 * 86400
-        need = [m for m in ms if m["ticker"] not in data or not data[m["ticker"]].get("q")]
+        need = [m for m in ms if m["ticker"] not in data or not data[m["ticker"]].get("q")
+                or (a.full and "c" not in data[m["ticker"]])]
         print(f"{len(ms)} markets in range, {len(need)} to download (archive cutoff "
               f"{datetime.fromtimestamp(cutoff, ET):%b %d})")
         done = 0
@@ -349,6 +374,9 @@ def main(argv=None):
     if not ms:
         print("No markets found.")
         return 1
+    if a.full:
+        print(f"Saved {len(ms)} markets with full minute data to {path}")
+        return 0
     md = report(sorted(ms, key=lambda m: m["close"]), a.series, start, end, api.calls)
     with open(os.path.join(HERE, "BACKTEST.md"), "w") as f:
         f.write(md)

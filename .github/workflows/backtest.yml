@@ -15,6 +15,10 @@ on:
       series:
         description: "Kalshi series"
         default: "KXGOLD15M"
+      full:
+        description: "Download every minute of each market (for model training)"
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -33,7 +37,7 @@ jobs:
         with:
           python-version: "3.12"
       - name: Run backtest
-        run: python backtest.py --series "${{ inputs.series }}" --start "${{ inputs.start }}" --end "${{ inputs.end }}"
+        run: python backtest.py --series "${{ inputs.series }}" --start "${{ inputs.start }}" --end "${{ inputs.end }}" ${{ inputs.full && '--full' || '' }}
       - name: Save results
         if: always()
         run: |
