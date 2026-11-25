@@ -1,0 +1,46 @@
+name: Gold backtest
+
+# Start by hand: Actions -> Gold backtest -> Run workflow.
+# Downloads gold prices (saved in data/, so re-runs only fetch new markets) and writes BACKTEST.md.
+
+on:
+  workflow_dispatch:
+    inputs:
+      start:
+        description: "Start date (YYYY-MM-DD)"
+        default: "2026-08-01"
+      end:
+        description: "End date (YYYY-MM-DD, blank = today)"
+        default: ""
+      series:
+        description: "Kalshi series"
+        default: "KXGOLD15M"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: gold-backtest
+  cancel-in-progress: false
+
+jobs:
+  backtest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 340
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Run backtest
+        run: python backtest.py --series "${{ inputs.series }}" --start "${{ inputs.start }}" --end "${{ inputs.end }}"
+      - name: Save results
+        if: always()
+        run: |
+          git config user.name "gold-backtest"
+          git config user.email "actions@users.noreply.github.com"
+          git add -f BACKTEST.md data/ 2>/dev/null || true
+          git diff --cached --quiet && exit 0
+          git commit -m "backtest: ${{ inputs.series }} ${{ inputs.start }} to ${{ inputs.end || 'today' }}"
+          for i in 1 2 3 4 5; do git pull --rebase -q && git push -q && exit 0; sleep 5; done
+          exit 1
