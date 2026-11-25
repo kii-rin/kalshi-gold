@@ -134,11 +134,28 @@ class Kalshi:
         return self.request("GET", "/portfolio/balance", auth=True)
 
     def buy(self, ticker, side, count, limit_cents):
-        price = f"{limit_cents / 100:.4f}"
-        body = {"ticker": ticker, "side": side, "action": "buy", "count": count, "type": "limit",
-                "time_in_force": "immediate_or_cancel", "client_order_id": str(uuid.uuid4()),
-                f"{side}_price_dollars": price}
-        return self.request("POST", "/portfolio/orders", body=body, auth=True).get("order", {})
+        """Buy `count` contracts of `side` paying at most `limit_cents` each (immediate-or-cancel).
+
+        Kalshi's V2 order endpoint only quotes the YES leg: "bid" buys YES, "ask" sells YES.
+        Buying NO at up to L cents is the same as selling YES at L' = 100 - L cents or more.
+        Returns {fill_count_fp, taker_fill_cost_dollars, taker_fees_dollars} for the side bought.
+        """
+        if side == "yes":
+            v2_side, yes_price = "bid", limit_cents
+        else:
+            v2_side, yes_price = "ask", 100 - limit_cents
+        body = {"ticker": ticker, "side": v2_side, "count": f"{int(count)}.00",
+                "price": f"{yes_price / 100:.4f}", "time_in_force": "immediate_or_cancel",
+                "self_trade_prevention_type": "taker_at_cross", "client_order_id": str(uuid.uuid4())}
+        r = self.request("POST", "/portfolio/events/orders", body=body, auth=True)
+        filled = float(r.get("fill_count") or 0)
+        out = {"order_id": r.get("order_id"), "fill_count_fp": f"{filled:.2f}"}
+        if filled > 0 and r.get("average_fill_price") not in (None, ""):
+            yes_px = float(r["average_fill_price"])
+            px = yes_px if side == "yes" else 1 - yes_px
+            out["taker_fill_cost_dollars"] = f"{filled * px:.4f}"
+            out["taker_fees_dollars"] = f"{filled * float(r.get('average_fee_paid') or 0):.4f}"
+        return out
 
 
 # ------------------------------------------------------------------ strategy

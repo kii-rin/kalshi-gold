@@ -126,7 +126,7 @@ def test_sleeps_until_window_opens():
     assert b.step() == pytest.approx(3)             # inside the window: poll every 3s
 
 
-def test_signature_is_valid_rsa_pss():
+def test_signature_is_valid_rsa_pss_and_v2_order_body():
     key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
     pem = key.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8,
                             serialization.NoEncryption()).decode()
@@ -134,19 +134,40 @@ def test_signature_is_valid_rsa_pss():
 
     def opener(method, url, headers, body):
         seen.update(method=method, url=url, headers=headers, body=json.loads(body) if body else None)
-        return {"order": {"fill_count_fp": "2.00"}}
+        return {"order_id": "o1", "fill_count": "2.00", "remaining_count": "0.00",
+                "average_fill_price": "0.0600", "average_fee_paid": "0.0100", "ts_ms": 1}
 
-    k = bot.Kalshi("key-123", pem.replace("\n", "\\n").replace("\\n", "\n"), opener=opener)
-    k.buy("KXGOLD15M-X", "no", 2, 95)
+    k = bot.Kalshi("key-123", pem, opener=opener)
+    r = k.buy("KXGOLD15M-X", "no", 2, 95)
     h = seen["headers"]
-    msg = f"{h['KALSHI-ACCESS-TIMESTAMP']}POST/trade-api/v2/portfolio/orders".encode()
+    assert seen["url"].endswith("/trade-api/v2/portfolio/events/orders")
+    msg = f"{h['KALSHI-ACCESS-TIMESTAMP']}POST/trade-api/v2/portfolio/events/orders".encode()
     key.public_key().verify(base64.b64decode(h["KALSHI-ACCESS-SIGNATURE"]), msg,
                             padding.PSS(mgf=padding.MGF1(hashes.SHA256()), salt_length=padding.PSS.DIGEST_LENGTH),
                             hashes.SHA256())
-    assert h["KALSHI-ACCESS-KEY"] == "key-123"
     b = seen["body"]
-    assert b["side"] == "no" and b["action"] == "buy" and b["count"] == 2 and b["no_price_dollars"] == "0.9500"
-    assert b["time_in_force"] == "immediate_or_cancel"
+    # buying NO at <=95c == selling YES at >=5c
+    assert b == {**b, "side": "ask", "price": "0.0500", "count": "2.00", "time_in_force": "immediate_or_cancel",
+                 "self_trade_prevention_type": "taker_at_cross"}
+    assert "action" not in b and "type" not in b
+    # filled at YES 6c -> paid 94c per NO contract
+    assert r["fill_count_fp"] == "2.00" and r["taker_fill_cost_dollars"] == "1.8800" and r["taker_fees_dollars"] == "0.0200"
+    filled, spent = bot.fill_info(r, 95)
+    assert filled == 2 and spent == pytest.approx(1.90)
+
+
+def test_v2_yes_buy_and_no_fill():
+    seen = {}
+
+    def opener(method, url, headers, body):
+        seen["body"] = json.loads(body)
+        return {"order_id": "o2", "fill_count": "0.00", "remaining_count": "0.00", "ts_ms": 1}
+
+    k = bot.Kalshi("k", None, opener=opener)
+    k.sign = lambda *a: "sig"
+    r = k.buy("T", "yes", 1, 94)
+    assert seen["body"]["side"] == "bid" and seen["body"]["price"] == "0.9400" and seen["body"]["count"] == "1.00"
+    assert bot.fill_info(r, 94)[0] == 0
 
 
 def test_private_key_with_escaped_newlines():
