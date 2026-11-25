@@ -13,7 +13,7 @@ For a short test (a day or so), it can run on GitHub Actions. The defaults there
 1. In this repo, go to **Settings → Secrets and variables → Actions**.
 2. Under **Secrets**, add `KALSHI_API_KEY_ID` and `KALSHI_PRIVATE_KEY` (the whole key text).
 3. Go to **Actions → Gold bot (test run) → Run workflow**. It runs for about 6 hours. Tap the run to watch its log.
-4. To keep it going all day, add the repo **variable** `BOT_ENABLED` = `true`. It then restarts every 6 hours on weekdays. Set it to `false` when you're done.
+4. It keeps itself going: GitHub tries to start it every hour, and a new run waits in line until the current one ends. To stop it, add the repo **variable** `BOT_ENABLED` = `false` and cancel the running run.
 
 Optional **variables**:
 - `LIVE` = `false` for paper mode

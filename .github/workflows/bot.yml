@@ -1,9 +1,9 @@
 name: Gold bot (test run)
 
 # Runs the bot for up to ~5h50m per run (GitHub's limit is 6h per job).
-# Starts by hand (Actions tab -> Gold bot -> Run workflow) and, while the repo
-# variable BOT_ENABLED is "true", again every 6 hours on weekdays so a full day is covered.
-# To stop: set BOT_ENABLED to false, or Actions -> Gold bot -> "..." -> Disable workflow.
+# A scheduled start every hour keeps one run waiting in line, so when a run ends the
+# next starts right away. To stop the restarts: add the repo variable BOT_ENABLED = false
+# (or Actions -> Gold bot -> "..." -> Disable workflow), then cancel the running run.
 
 on:
   workflow_dispatch:
@@ -12,7 +12,7 @@ on:
         description: "How many minutes to run (max 350)"
         default: "350"
   schedule:
-    - cron: "57 */6 * * 1-5"
+    - cron: "57 * * * *"
 
 concurrency:
   group: gold-bot
@@ -23,7 +23,7 @@ permissions:
 
 jobs:
   run:
-    if: github.event_name == 'workflow_dispatch' || vars.BOT_ENABLED == 'true'
+    if: github.event_name == 'workflow_dispatch' || vars.BOT_ENABLED != 'false'
     runs-on: ubuntu-latest
     timeout-minutes: 358
     steps:
