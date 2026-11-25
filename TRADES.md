@@ -2,24 +2,25 @@
 
 > **This is a small personal experiment with $1 trades, not investment advice.** A few days of wins says little: one loss at 95c wipes out about 15 wins, and results like these can reverse at any time. Don't put in money you can't afford to lose.
 
-_Updated Nov 25, 5:01 AM ET. Each row is one trade, added when the market settles._
+_Updated Nov 25, 5:15 AM ET. Each row is one trade, added when the market settles._
 
 | | Trades | Won | Lost | Win rate | Profit |
 |---|--:|--:|--:|--:|--:|
-| **Today** | 9 | 9 | 0 | 100% | **+$0.67** |
-| **All time** | 15 | 14 | 1 | 93% | **+$0.27** |
+| **Today** | 10 | 10 | 0 | 100% | **+$0.71** |
+| **All time** | 16 | 15 | 1 | 94% | **+$0.31** |
 
 ## By day
 
 | Day | Trades | Won | Lost | Profit |
 |---|--:|--:|--:|--:|
-| Wed Nov 25 | 9 | 9 | 0 | +$0.67 |
+| Wed Nov 25 | 10 | 10 | 0 | +$0.71 |
 | Tue Nov 24 | 6 | 5 | 1 | -$0.40 |
 
 ## Trades (newest first)
 
 | Market closed (ET) | Bought | Price | Paid | Result | Profit |
 |---|---|--:|--:|---|--:|
+| Nov 25 5:15 AM | YES x1 | 96c | $0.96 | Won | +$0.04 |
 | Nov 25 5:00 AM | YES x1 | 92c | $0.91 | Won | +$0.09 |
 | Nov 25 4:15 AM | NO x1 | 95c | $0.95 | Won | +$0.05 |
 | Nov 25 4:00 AM | NO x1 | 80c | $0.80 | Won | +$0.20 |
