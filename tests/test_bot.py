@@ -19,7 +19,7 @@ def iso(ts):
 
 
 def settings(**kw):
-    vals = {"LIVE": "false", "DAILY_LIMIT": "20", "CONFIRM_CHECKS": "1"}
+    vals = {"LIVE": "false", "DAILY_LIMIT": "20", "STABLE_SECONDS": "0"}
     vals.update({k: str(v) for k, v in kw.items()})
     return bot.Settings(lambda n, d=None: vals.get(n, d))
 
@@ -44,6 +44,10 @@ class FakeKalshi:
 
     def market(self, ticker):
         return next((m for m in self.markets if m["ticker"] == ticker), {"ticker": ticker})
+
+    def book_asks(self, ticker):
+        m = next((m for m in self.markets if m["ticker"] == ticker), None)
+        return bot.asks(m) if m else (None, None)
 
     fills = []
 
@@ -317,37 +321,41 @@ def test_trades_md_page():
     assert len(bot.parse_csv(gh.files["trades.csv"][0])) == 3
 
 
-def test_needs_two_steady_checks_and_fresh_price():
-    k = FakeKalshi([mkt("A", 100, yes_ask=93, no_ask=8)])
+def run_window(prices, stable=30, book=None):
+    """prices: list of (yes_ask, no_ask) seen every 3s starting at 170s left. Returns orders placed."""
+    k = FakeKalshi([])
+    if book:
+        k.book_asks = book
     t = [NOW]
-    b = bot.Bot(settings(LIVE="true", KALSHI_API_KEY_ID="x", KALSHI_PRIVATE_KEY="y", CONFIRM_CHECKS=2), k,
+    b = bot.Bot(settings(LIVE="true", KALSHI_API_KEY_ID="x", KALSHI_PRIVATE_KEY="y", STABLE_SECONDS=stable), k,
                 clock=lambda: t[0])
-    b.step()
-    assert k.orders == []                      # first sighting: wait for a second check
-    t[0] += 3
-    b.step()
-    assert k.orders == [("A", "yes", 2, 94)]  # steady -> buy
+    for i, (ya, na) in enumerate(prices):
+        k.markets = [mkt("A", 170 - 3 * i, yes_ask=ya, no_ask=na)]
+        t[0] = NOW + 3 * i
+        k.markets[0]["close_time"] = iso(NOW + 170)
+        b.step()
+        if k.orders:
+            return k.orders, i
+    return k.orders, None
 
 
-def test_skips_when_price_swings_between_checks():
-    k = FakeKalshi([mkt("A", 100, yes_ask=4, no_ask=96)])
-    t = [NOW]
-    b = bot.Bot(settings(LIVE="true", KALSHI_API_KEY_ID="x", KALSHI_PRIVATE_KEY="y", CONFIRM_CHECKS=2), k,
-                clock=lambda: t[0])
-    b.step()                                   # NO 96 in band
-    k.markets = [mkt("A", 97, yes_ask=18, no_ask=83)]
-    t[0] += 3
-    b.step()                                   # swung to NO 83 -> streak broken
-    assert k.orders == []
+def test_buys_only_after_30s_steady():
+    orders, i = run_window([(93, 8)] * 20)
+    assert orders == [("A", "yes", 2, 94)] and i == 10      # 30s after first sighting
 
 
-def test_fresh_recheck_blocks_stale_quote():
-    k = FakeKalshi([mkt("A", 100, yes_ask=4, no_ask=96)])
-    k.market = lambda tk: mkt("A", 99, yes_ask=18, no_ask=83)   # live price already moved
-    t = [NOW]
-    b = bot.Bot(settings(LIVE="true", KALSHI_API_KEY_ID="x", KALSHI_PRIVATE_KEY="y", CONFIRM_CHECKS=2), k,
-                clock=lambda: t[0])
-    b.step()
-    t[0] += 3
-    b.step()
-    assert k.orders == []
+def test_spike_into_band_is_skipped():
+    # 5:45 AM case: YES around 57-80c, spikes to 92c -> must not buy
+    seq = [(60, 41), (70, 31), (80, 21), (92, 9), (92, 9), (92, 9), (88, 13), (90, 11), (61, 40), (40, 61)]
+    assert run_window(seq)[0] == []
+
+
+def test_flip_resets_steadiness():
+    seq = [(93, 8)] * 6 + [(5, 96)] + [(93, 8)] * 8
+    orders, i = run_window(seq)
+    assert orders == [] or i >= 6 + 1 + 10
+
+
+def test_live_book_blocks_stale_quote():
+    orders, _ = run_window([(4, 96)] * 15, book=lambda tk: (18, 83))
+    assert orders == []

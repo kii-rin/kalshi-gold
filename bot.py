@@ -41,7 +41,7 @@ class Settings:
         self.slip = float(e("SLIPPAGE_CENTS", "1"))       # may pay up to this much above the ask seen
         self.poll = float(e("POLL_SECONDS", "3"))
         self.max_tries = int(e("MAX_TRIES_PER_MARKET", "3"))
-        self.confirm_checks = int(e("CONFIRM_CHECKS", "2"))      # in band this many checks in a row before buying
+        self.stable_seconds = float(e("STABLE_SECONDS", "30"))   # favorite must hold >= BAND_LOW this long
         self.key_id = e("KALSHI_API_KEY_ID")
         self.private_key = (e("KALSHI_PRIVATE_KEY") or "").replace("\\n", "\n")
         self.ntfy_topic = e("NTFY_TOPIC")                 # optional phone alerts via ntfy.sh
@@ -135,6 +135,20 @@ class Kalshi:
 
     def market(self, ticker):
         return self.request("GET", f"/markets/{ticker}").get("market", {})
+
+    def book_asks(self, ticker):
+        """Live (yes_ask, no_ask) in cents from the order book. YES ask = 100 - best NO bid, and vice versa."""
+        d = self.request("GET", f"/markets/{ticker}/orderbook")
+        ob = d.get("orderbook_fp") or {}
+        yb = [float(p) * 100 for p, _ in ob.get("yes_dollars") or []]
+        nb = [float(p) * 100 for p, _ in ob.get("no_dollars") or []]
+        if not ob:                                   # older shape: cents
+            old = d.get("orderbook") or {}
+            yb = [float(p) for p, _ in old.get("yes") or []]
+            nb = [float(p) for p, _ in old.get("no") or []]
+        ya = round(100 - max(nb), 2) if nb else None
+        na = round(100 - max(yb), 2) if yb else None
+        return ya, na
 
     def balance(self):
         return self.request("GET", "/portfolio/balance", auth=True)
@@ -365,7 +379,7 @@ class Bot:
         self.done, self.tries, self.logged = set(), {}, set()
         self.day, self.spent = None, 0.0
         self.pending = {}            # ticker -> trade waiting for the market to settle
-        self.streak = {}             # ticker -> (side, checks in a row in band, last check time)
+        self.hist = {}               # ticker -> [(time, favorite side, favorite price)] during the window
         self.tradelog = TradeLog(s.github_token, s.github_repo) if (s.github_token and s.github_repo) else None
         self.day_pnl, self.day_w, self.day_l = 0.0, 0, 0
 
@@ -425,25 +439,34 @@ class Bot:
                     next_wake = min(next_wake, max(1.0, secs_left - self.s.start_seconds))
                 continue
             next_wake = min(next_wake, self.s.poll)
+            ya, na = asks(m)
+            opts = [(sd, p) for sd, p in (("yes", ya), ("no", na)) if p is not None]
+            if opts:
+                self.hist.setdefault(t, []).append((now,) + max(opts, key=lambda o: o[1]))
             if action == "buy":
-                # steady-price check: same favorite in the band on consecutive checks (a few seconds apart)
-                side0, n0, t0 = self.streak.get(t, (None, 0, 0))
-                n = n0 + 1 if side0 == d["side"] and now - t0 <= self.s.poll * 4 else 1
-                self.streak[t] = (d["side"], n, now)
-                if n < self.s.confirm_checks:
+                # steady-price check: same favorite at >= BAND_LOW for the whole last STABLE_SECONDS
+                h = self.hist.get(t, [])
+                recent = [x for x in h if x[0] >= now - self.s.stable_seconds]
+                steady = (bool(h) and now - h[0][0] >= self.s.stable_seconds
+                          and all(sd == d["side"] and p >= self.s.low for _, sd, p in recent))
+                if not steady:
+                    key = (t, "steady")
+                    if key not in self.logged and h and now - h[0][0] >= self.s.stable_seconds:
+                        self.logged.add(key)
+                        lo = min((p for _, sd, p in recent if sd == d["side"]), default=0)
+                        log(f"{t}: {int(secs_left)}s left, waiting - {d['side'].upper()} at {d['price']:g}c "
+                            f"but not steady for {self.s.stable_seconds:g}s (low {lo:g}c or the favorite flipped)")
                     continue
-                # fresh-price check: re-read this market right before ordering
+                # fresh-price check from the live order book right before ordering
                 try:
-                    m = {**m, **self.k.market(t)}
+                    ya2, na2 = self.k.book_asks(t)
+                    m = {**m, "yes_ask_dollars": None if ya2 is None else f"{ya2 / 100:.4f}",
+                         "no_ask_dollars": None if na2 is None else f"{na2 / 100:.4f}", "yes_bid_dollars": None}
                     action, d = decide(m, self.s, self.clock())
                 except Exception as e:
                     action, d = "skip", {"why": f"couldn't re-check price ({e})", "secs_left": secs_left}
-                if action != "buy":
-                    self.streak.pop(t, None)
-                    if action == "skip":
-                        d["why"] = "price moved just before ordering: " + d.get("why", "")
-            else:
-                self.streak.pop(t, None)
+                if action == "skip":
+                    d["why"] = "price moved just before ordering: " + d.get("why", "")
             if action == "wait":
                 continue
             if action == "skip":
@@ -495,6 +518,8 @@ class Bot:
             self.check_settled()
             if self.pending:
                 next_wake = min(next_wake, 30.0)
+        for t in [t for t in self.hist if t in self.done or t not in {m.get("ticker") for m in markets}]:
+            self.hist.pop(t, None)
         if len(self.done) > 500:
             self.done = set(list(self.done)[-200:])
         return next_wake

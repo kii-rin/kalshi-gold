@@ -64,6 +64,7 @@ Once the paper trades look right (give it a day or so), change `LIVE` to `true`.
 
 ## Notes
 - Gold markets only trade on weekdays. At other times the bot just waits.
+- It only buys when the same side has been the favorite at or above `BAND_LOW` for the last 30 seconds (`STABLE_SECONDS`), and the live order book still shows it in the band right before ordering. That skips markets that spike into the band.
 - Orders are immediate-or-cancel: if nothing fills, it tries up to 3 times while still in the window and in the band.
 - The daily spend total resets if Railway restarts the bot.
 - The backtest covered about 37 trades, which isn't proof. Keep bets small at first.
