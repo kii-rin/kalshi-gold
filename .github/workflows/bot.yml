@@ -19,8 +19,7 @@ concurrency:
   cancel-in-progress: false
 
 permissions:
-  contents: read
-  issues: write     # the bot opens an issue for each purchase -> GitHub notifies you
+  contents: write   # the bot updates TRADES.md (trade log) in this repo
 
 jobs:
   run:

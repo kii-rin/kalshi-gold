@@ -229,68 +229,86 @@ def test_ed25519_key_signature():
                             f"{h['KALSHI-ACCESS-TIMESTAMP']}GET/trade-api/v2/portfolio/balance".encode())
 
 
-def test_alert_when_trade_settles_not_when_bought(monkeypatch):
-    sent = []
+def test_trade_logged_when_it_settles_not_when_bought():
+    rows = []
     t = [NOW]
     k = FakeKalshi([mkt("A", 100, yes_ask=93, no_ask=8)])
     k.results = {}
     k.market = lambda tk: {"ticker": tk, "result": k.results.get(tk, "")}
     b = bot.Bot(settings(LIVE="true", KALSHI_API_KEY_ID="x", KALSHI_PRIVATE_KEY="y"), k, clock=lambda: t[0])
-    monkeypatch.setattr(b, "notify", lambda msg, title=None: sent.append((title, msg)))
+    b.record = rows.append
     b.step()
-    assert sent == [] and "A" in b.pending            # bought, no alert yet
+    assert rows == [] and "A" in b.pending
     t[0] = NOW + 130
-    assert b.step() <= 30 and sent == []             # closed but not settled yet: keep checking
+    assert b.step() <= 30 and rows == []
     k.results["A"] = "yes"
     k.markets = []
     b.step()
-    title, msg = sent[0]
-    assert title == "WON +$0.10 - YES at 95c (today 1W/0L, +$0.10)"
-    assert "settled YES" in msg and "Profit +$0.10" in msg and not b.pending
+    r = rows[0]
+    assert (r["side"], r["result"], r["paid"], r["profit"], r["price_c"]) == ("yes", "won", "1.90", "0.10", 95.0)
+    assert not b.pending
 
 
-def test_loss_alert_and_daily_tally(monkeypatch):
-    sent = []
+def test_loss_logged():
+    rows = []
     t = [NOW]
     k = FakeKalshi([mkt("A", 100, yes_ask=6, no_ask=95)])
     k.market = lambda tk: {"result": "yes"}
     b = bot.Bot(settings(LIVE="true", KALSHI_API_KEY_ID="x", KALSHI_PRIVATE_KEY="y"), k, clock=lambda: t[0])
-    monkeypatch.setattr(b, "notify", lambda msg, title=None: sent.append(title))
+    b.record = rows.append
     b.step()
     t[0] = NOW + 130
     k.markets = []
     b.step()
-    assert sent == ["LOST -$1.94 - NO at 97c (today 0W/1L, -$1.94)"]
+    assert rows[0]["result"] == "lost" and rows[0]["profit"] == "-1.94" and rows[0]["side"] == "no"
 
 
-def test_first_failure_alerts_once(monkeypatch):
-    sent = []
+def test_first_failure_logged_once():
+    rows = []
 
     class Broken(FakeKalshi):
         def buy(self, *a):
             raise RuntimeError("410 gone")
     k2 = Broken([mkt("B", 100, yes_ask=93, no_ask=8)])
     b2 = bot.Bot(settings(LIVE="true", KALSHI_API_KEY_ID="x", KALSHI_PRIVATE_KEY="y"), k2, clock=lambda: NOW)
-    monkeypatch.setattr(b2, "notify", lambda msg, title=None: sent.append(title))
+    b2.record = rows.append
     for _ in range(3):
         b2.step()
-    assert sent == ["Order FAILED on B"]
+    assert len(rows) == 1 and rows[0]["result"] == "order failed" and "410" in rows[0]["note"]
 
 
-def test_github_issue_alert(monkeypatch):
-    calls = []
+class FakeGitHub:
+    def __init__(self):
+        self.files, self.puts = {}, []
 
-    class Resp:
-        def close(self):
-            pass
+    def __call__(self, method, url, body):
+        path = url.split("/contents/")[1]
+        if method == "GET":
+            if path not in self.files:
+                raise bot.urllib.error.HTTPError(url, 404, "nf", {}, None)
+            text, sha = self.files[path]
+            return {"content": base64.b64encode(text.encode()).decode(), "sha": sha}
+        if path in self.files:
+            assert body.get("sha") == self.files[path][1]       # must send current sha to update
+        self.puts.append(path)
+        self.files[path] = (base64.b64decode(body["content"]).decode(), f"sha{len(self.puts)}")
+        return {}
 
-    def fake_urlopen(req, timeout=10):
-        calls.append((req.full_url, json.loads(req.data), req.headers))
-        return Resp()
 
-    monkeypatch.setattr(bot.urllib.request, "urlopen", fake_urlopen)
-    b = bot.Bot(settings(GITHUB_TOKEN="tok", GITHUB_REPOSITORY="kii-rin/kalshi-gold"), FakeKalshi([]))
-    b.notify("BOUGHT X", title="Bought YES X for $0.95")
-    url, body, headers = calls[0]
-    assert url == "https://api.github.com/repos/kii-rin/kalshi-gold/issues"
-    assert body == {"title": "Bought YES X for $0.95", "body": "BOUGHT X"} and headers["Authorization"] == "Bearer tok"
+def test_trades_md_page():
+    gh = FakeGitHub()
+    log = bot.TradeLog("tok", "kii-rin/kalshi-gold", opener=gh)
+    close = 1795567500   # Nov 24 2026, 7:45 PM ET
+    log.add({"closed": close, "ticker": "KXGOLD15M-26NOV241945-45", "side": "yes", "contracts": 1, "price_c": 89,
+             "paid": "0.89", "result": "won", "profit": "0.11"})
+    log.add({"closed": close + 900, "ticker": "KXGOLD15M-26NOV242000-00", "side": "no", "contracts": 1, "price_c": 95,
+             "paid": "0.95", "result": "lost", "profit": "-0.95"})
+    log.add({"closed": close + 1800, "ticker": "KXGOLD15M-26NOV242015-15", "side": "yes", "result": "order failed",
+             "note": "400 bad price"})
+    md = gh.files["TRADES.md"][0]
+    assert "| **All time** | 2 | 1 | 1 | 50% | **-$0.84** |" in md
+    assert "| Nov 24 7:45 PM | YES x1 | 89c | $0.89 | Won | +$0.11 |" in md
+    assert "| Nov 24 8:00 PM | NO x1 | 95c | $0.95 | **Lost** | -$0.95 |" in md
+    assert md.index("8:00 PM | NO") < md.index("7:45 PM | YES")          # newest first
+    assert "## Problems" in md and "400 bad price" in md
+    assert len(bot.parse_csv(gh.files["trades.csv"][0])) == 3

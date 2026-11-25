@@ -229,6 +229,131 @@ def fill_info(order, fallback_price):
     return filled, cost + fees
 
 
+# ------------------------------------------------------------------ trade log (TRADES.md in the repo)
+LOG_FIELDS = ["closed", "ticker", "side", "contracts", "price_c", "paid", "result", "profit", "note"]
+
+
+class TradeLog:
+    """Keeps trades.csv (data) and TRADES.md (readable page) in the GitHub repo, via the contents API."""
+
+    def __init__(self, token, repo, opener=None):
+        self.token, self.repo = token, repo
+        self.opener = opener or self._urlopen
+
+    def _urlopen(self, method, url, body):
+        req = urllib.request.Request(url, data=json.dumps(body).encode() if body else None, method=method,
+                                     headers={"Authorization": f"Bearer {self.token}",
+                                              "Accept": "application/vnd.github+json",
+                                              "Content-Type": "application/json"})
+        with urllib.request.urlopen(req, timeout=15) as r:
+            return json.loads(r.read().decode() or "{}")
+
+    def _get(self, path):
+        try:
+            d = self.opener("GET", f"https://api.github.com/repos/{self.repo}/contents/{path}", None)
+        except urllib.error.HTTPError as e:
+            if e.code == 404:
+                return "", None
+            raise
+        return base64.b64decode(d.get("content", "")).decode(), d.get("sha")
+
+    def _put(self, path, text, sha, msg):
+        body = {"message": msg, "content": base64.b64encode(text.encode()).decode()}
+        if sha:
+            body["sha"] = sha
+        self.opener("PUT", f"https://api.github.com/repos/{self.repo}/contents/{path}", body)
+
+    def add(self, row):
+        for attempt in range(3):
+            try:
+                text, sha = self._get("trades.csv")
+                rows = parse_csv(text)
+                rows.append({k: str(row.get(k, "")) for k in LOG_FIELDS})
+                self._put("trades.csv", to_csv(rows), sha, f"log: {row.get('result')} {row.get('ticker')}")
+                _, md_sha = self._get("TRADES.md")
+                self._put("TRADES.md", render_md(rows, time.time()), md_sha, "log: update TRADES.md")
+                return True
+            except urllib.error.HTTPError as e:
+                if e.code in (409, 422) and attempt < 2:   # file changed underneath us: re-read and retry
+                    continue
+                log(f"(trade log update failed: {e})")
+                return False
+            except Exception as e:
+                log(f"(trade log update failed: {e})")
+                return False
+
+
+def parse_csv(text):
+    import csv, io
+    if not text.strip():
+        return []
+    return [dict(r) for r in csv.DictReader(io.StringIO(text))]
+
+
+def to_csv(rows):
+    import csv, io
+    out = io.StringIO()
+    w = csv.DictWriter(out, fieldnames=LOG_FIELDS, lineterminator="\n")
+    w.writeheader()
+    for r in rows:
+        w.writerow({k: r.get(k, "") for k in LOG_FIELDS})
+    return out.getvalue()
+
+
+def money(x):
+    return f"{'+' if x >= 0 else '-'}${abs(x):.2f}"
+
+
+def render_md(rows, now):
+    trades = [r for r in rows if r["result"] in ("won", "lost")]
+    problems = [r for r in rows if r["result"] not in ("won", "lost")]
+
+    def stats(rs):
+        w = sum(r["result"] == "won" for r in rs)
+        n = len(rs)
+        pnl = sum(float(r["profit"] or 0) for r in rs)
+        paid = sum(float(r["paid"] or 0) for r in rs)
+        return n, w, n - w, (f"{w / n * 100:.0f}%" if n else "-"), money(pnl), paid
+
+    def day(r):
+        return datetime.fromtimestamp(float(r["closed"]), ET).strftime("%a %b %d")
+
+    def when(r):
+        return datetime.fromtimestamp(float(r["closed"]), ET).strftime("%b %d %I:%M %p").replace(" 0", " ")
+
+    today = datetime.fromtimestamp(now, ET).strftime("%a %b %d")
+    a, t = stats(trades), stats([r for r in trades if day(r) == today])
+    L = ["# Gold bot trade log", "",
+         f"_Updated {datetime.fromtimestamp(now, ET).strftime('%b %d, %I:%M %p').replace(' 0', ' ')} ET. "
+         "Each row is one trade, added when the market settles._", "",
+         "| | Trades | Won | Lost | Win rate | Profit |", "|---|--:|--:|--:|--:|--:|",
+         f"| **Today** | {t[0]} | {t[1]} | {t[2]} | {t[3]} | **{t[4]}** |",
+         f"| **All time** | {a[0]} | {a[1]} | {a[2]} | {a[3]} | **{a[4]}** |", ""]
+    days = []
+    for r in trades:
+        if day(r) not in days:
+            days.append(day(r))
+    if len(days) > 1:
+        L += ["## By day", "", "| Day | Trades | Won | Lost | Profit |", "|---|--:|--:|--:|--:|"]
+        for d in reversed(days):
+            s = stats([r for r in trades if day(r) == d])
+            L.append(f"| {d} | {s[0]} | {s[1]} | {s[2]} | {s[4]} |")
+        L.append("")
+    L += ["## Trades (newest first)", "", "| Market closed (ET) | Bought | Price | Paid | Result | Profit |",
+          "|---|---|--:|--:|---|--:|"]
+    for r in reversed(trades):
+        won = r["result"] == "won"
+        L.append(f"| {when(r)} | {r['side'].upper()} x{float(r['contracts']):g} | {float(r['price_c']):.0f}c | "
+                 f"${float(r['paid']):.2f} | {'Won' if won else '**Lost**'} | {money(float(r['profit']))} |")
+    if not trades:
+        L.append("| no trades yet | | | | | |")
+    if problems:
+        L += ["", "## Problems", ""]
+        for r in reversed(problems[-20:]):
+            L.append(f"- {when(r)} {r['ticker']}: {r['result']} - {r['note']}")
+    return "\n".join(L) + "\n"
+
+
 # ------------------------------------------------------------------ main loop
 class Bot:
     def __init__(self, s, kalshi, clock=time.time, sleep=time.sleep):
@@ -236,20 +361,16 @@ class Bot:
         self.done, self.tries, self.logged = set(), {}, set()
         self.day, self.spent = None, 0.0
         self.pending = {}            # ticker -> trade waiting for the market to settle
+        self.tradelog = TradeLog(s.github_token, s.github_repo) if (s.github_token and s.github_repo) else None
         self.day_pnl, self.day_w, self.day_l = 0.0, 0, 0
 
+    def record(self, row):
+        if self.tradelog:
+            self.tradelog.add(row)
+
     def notify(self, msg, title=None):
+        """Log line, plus an optional phone alert via ntfy if NTFY_TOPIC is set."""
         log(msg)
-        if self.s.github_token and self.s.github_repo:
-            try:
-                body = json.dumps({"title": (title or msg)[:120], "body": msg}).encode()
-                req = urllib.request.Request(f"https://api.github.com/repos/{self.s.github_repo}/issues", data=body,
-                                             method="POST", headers={"Authorization": f"Bearer {self.s.github_token}",
-                                                                     "Accept": "application/vnd.github+json",
-                                                                     "Content-Type": "application/json"})
-                urllib.request.urlopen(req, timeout=10).close()
-            except Exception as e:
-                log(f"(GitHub alert failed: {e})")
         if self.s.ntfy_topic:
             try:
                 req = urllib.request.Request(f"https://ntfy.sh/{self.s.ntfy_topic}", data=msg.encode(), method="POST")
@@ -322,10 +443,10 @@ class Bot:
             try:
                 order = self.k.buy(t, d["side"], d["count"], d["limit"])
             except RuntimeError as e:
+                log(f"{t}: order failed - {e}")
                 if self.tries[t] == 1:
-                    self.notify(f"{t}: order failed - {e}", title=f"Order FAILED on {t}")
-                else:
-                    log(f"{t}: order failed - {e}")
+                    self.record({"closed": int(parse_ts(m["close_time"])), "ticker": t, "side": d["side"],
+                                 "result": "order failed", "note": str(e)[:200]})
                 if self.tries[t] >= self.s.max_tries:
                     self.done.add(t)
                 continue
@@ -364,8 +485,10 @@ class Bot:
             res = (m.get("result") or "").lower()
             if res not in ("yes", "no"):
                 if p["checks"] >= 60:           # ~30 min with no result: stop waiting
-                    self.notify(f"{t}: no result from Kalshi after 30 min. Check the Kalshi app.",
-                                title=f"No result yet for {t}")
+                    log(f"{t}: no result from Kalshi after 30 min. Check the Kalshi app.")
+                    self.record({"closed": int(p["close"]), "ticker": t, "side": p["side"], "contracts": p["n"],
+                                 "paid": f"{p['cost']:.2f}", "result": "no result",
+                                 "note": "Kalshi gave no result after 30 min; check the Kalshi app"})
                     del self.pending[t]
                 continue
             won = res == p["side"]
@@ -378,9 +501,10 @@ class Bot:
             sign = "+" if pnl >= 0 else "-"
             title = (f"{'WON' if won else 'LOST'} {sign}${abs(pnl):.2f} - {p['side'].upper()} at {each:.0f}c "
                      f"(today {self.day_w}W/{self.day_l}L, {'+' if self.day_pnl >= 0 else '-'}${abs(self.day_pnl):.2f})")
-            self.notify(f"{t}: bought {p['side'].upper()} {p['n']:g} contract(s) at {each:.1f}c each "
-                        f"(${p['cost']:.2f} with fees). Market settled {res.upper()}. "
-                        f"{'Paid out' if won else 'Paid'} ${payout:.2f}. Profit {sign}${abs(pnl):.2f}.", title=title)
+            self.notify(f"{title}. {t}: {p['side'].upper()} x{p['n']:g}, paid ${p['cost']:.2f}, settled {res.upper()}.")
+            self.record({"closed": int(p["close"]), "ticker": t, "side": p["side"], "contracts": p["n"],
+                         "price_c": round(each, 1), "paid": f"{p['cost']:.2f}", "result": "won" if won else "lost",
+                         "profit": f"{pnl:.2f}"})
             del self.pending[t]
 
     def run(self):
