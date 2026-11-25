@@ -359,3 +359,29 @@ def test_flip_resets_steadiness():
 def test_live_book_blocks_stale_quote():
     orders, _ = run_window([(4, 96)] * 15, book=lambda tk: (18, 83))
     assert orders == []
+
+
+def test_two_minute_window_watches_from_three_minutes():
+    """90-95c, buy only in the last 120s, favorite steady >= 90c for the 60s before."""
+    k = FakeKalshi([])
+    t = [NOW]
+    b = bot.Bot(settings(LIVE="true", KALSHI_API_KEY_ID="x", KALSHI_PRIVATE_KEY="y", BAND_LOW=90, BAND_HIGH=95,
+                         START_SECONDS=120, STABLE_SECONDS=60), k, clock=lambda: t[0])
+    close = NOW + 200
+    waits = []
+    for i in range(0, 200, 3):
+        t[0] = NOW + i
+        k.markets = [{"ticker": "A", "close_time": iso(close), "yes_ask_dollars": "0.9300", "no_ask_dollars": "0.0800"}]
+        waits.append((200 - i, b.step()))
+        if k.orders:
+            break
+    left_at_buy = waits[-1][0]
+    assert k.orders and k.orders[0][3] == 94
+    assert 115 <= left_at_buy <= 120          # first moment inside 2 min, after 60s of watching at 180s+
+    assert waits[0][1] == 20                  # at 200s left it sleeps until 180s left (watch start)
+
+
+def test_limit_capped_at_95():
+    a, d = bot.decide(mkt("A", 60, yes_ask=94.5, no_ask=6), settings(BAND_LOW=90, BAND_HIGH=95), NOW)
+    assert a == "buy" and d["limit"] == 95
+    assert bot.decide(mkt("B", 60, yes_ask=96, no_ask=5), settings(BAND_LOW=90, BAND_HIGH=95), NOW)[0] == "skip"

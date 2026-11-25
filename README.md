@@ -2,7 +2,7 @@
 
 Runs all day on a cloud server, so no PC needed.
 
-**Rule:** in the last 3 minutes before each 15-minute gold market closes, if the favorite costs **88–97¢**, buy it once and hold until it settles. This is the best band from the backtest.
+**Rule:** in the last 2 minutes before each 15-minute gold market closes, if the favorite costs **90–95¢** and has stayed the favorite at 90¢+ for the minute before, buy it once and hold until it settles. This was the best version in a backtest of 7,800+ markets (see BACKTEST.md). Even so, it only roughly broke even, so treat this as a learning test.
 
 It starts in **paper mode**: it only logs what it *would* buy. Nothing real happens until you set `LIVE=true`.
 
@@ -54,8 +54,9 @@ Once the paper trades look right (give it a day or so), change `LIVE` to `true`.
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `BAND_LOW` / `BAND_HIGH` | `88` / `97` | Price band in cents |
-| `START_SECONDS` | `180` | Start looking this many seconds before close |
+| `BAND_LOW` / `BAND_HIGH` | `90` / `95` (GitHub) | Price band in cents |
+| `START_SECONDS` | `120` (GitHub) | Only buy in the last this-many seconds |
+| `STABLE_SECONDS` | `60` (GitHub) | Favorite must have stayed at or above `BAND_LOW` this long before buying |
 | `DOLLARS_PER_TRADE` | `2` | Buys whole contracts ($2 at 93¢ = 2 contracts) |
 | `DAILY_LIMIT` | `20` | Max dollars spent per day (Eastern time). `0` = no limit |
 | `SLIPPAGE_CENTS` | `1` | May pay up to this much above the price it saw, but never above `BAND_HIGH` |

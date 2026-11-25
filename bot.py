@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Kalshi gold bot for the cloud (Railway or any server that runs Python all day).
 
-Rule (from the backtest): in the last 3 minutes before a 15-minute gold market closes,
-if the favorite's price is between 88c and 97c, buy it once and hold to settlement.
+Rule (from the backtest): in the last few minutes before a 15-minute gold market closes,
+if the favorite's price is inside the band and has been steady, buy it once and hold to settlement.
+Band/window come from settings (the GitHub workflow uses 90-95c in the last 2 minutes, steady for 60s).
 
 Starts in PAPER mode (it only logs what it would buy). Set LIVE=true to trade for real.
 All settings come from environment variables, so nothing secret lives in the code.
@@ -434,15 +435,18 @@ class Bot:
                 continue
             action, d = decide(m, self.s, now)
             secs_left = d.get("secs_left", 0)
-            if action == "wait":
+            watch = self.s.start_seconds + self.s.stable_seconds   # start watching early enough to judge steadiness
+            if action == "wait" and not (0 < secs_left <= watch):
                 if secs_left > 0:
-                    next_wake = min(next_wake, max(1.0, secs_left - self.s.start_seconds))
+                    next_wake = min(next_wake, max(1.0, secs_left - watch))
                 continue
             next_wake = min(next_wake, self.s.poll)
             ya, na = asks(m)
             opts = [(sd, p) for sd, p in (("yes", ya), ("no", na)) if p is not None]
             if opts:
                 self.hist.setdefault(t, []).append((now,) + max(opts, key=lambda o: o[1]))
+            if action == "wait":       # watching only: not yet inside the buy window
+                continue
             if action == "buy":
                 # steady-price check: same favorite at >= BAND_LOW for the whole last STABLE_SECONDS
                 h = self.hist.get(t, [])
