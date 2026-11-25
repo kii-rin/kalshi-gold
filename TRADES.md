@@ -1,6 +1,8 @@
-# Gold bot trade log
+# Gold bot trade log (personal test)
 
-_Updated Nov 24, 10:01 PM ET. Each row is one trade, added when the market settles._
+> **This is a small personal experiment with $1 trades, not investment advice.** A few days of wins says little: one loss at 95c wipes out about 15 wins, and results like these can reverse at any time. Don't put in money you can't afford to lose.
+
+_Updated Nov 24, 10:41 PM ET. Each row is one trade, added when the market settles._
 
 | | Trades | Won | Lost | Win rate | Profit |
 |---|--:|--:|--:|--:|--:|
