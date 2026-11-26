@@ -8,4 +8,4 @@ jobs:
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
-      - run: python3 tools/probe_pyth.py
+      - run: python3 tools/list_series.py
