@@ -39,8 +39,8 @@ jobs:
           LIVE: ${{ vars.LIVE || 'true' }}
           DOLLARS_PER_TRADE: ${{ vars.DOLLARS_PER_TRADE || '1' }}
           DAILY_LIMIT: ${{ vars.DAILY_LIMIT || '0' }}
-          BAND_LOW: ${{ vars.BAND_LOW || '80' }}
-          BAND_HIGH: ${{ vars.BAND_HIGH || '90' }}
+          BAND_LOW: ${{ vars.BAND_LOW || '70' }}
+          BAND_HIGH: ${{ vars.BAND_HIGH || '95' }}
           START_SECONDS: ${{ vars.START_SECONDS || '180' }}
           STABLE_SECONDS: ${{ vars.STABLE_SECONDS || '0' }}
           Z_MIN: ${{ vars.Z_MIN || '1' }}

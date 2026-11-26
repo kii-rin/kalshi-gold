@@ -405,7 +405,7 @@ def render_md(rows, now):
     a, t = stats(trades), stats([r for r in trades if day(r) == today])
     L = ["# Gold bot trade log (personal test)", "",
          "> **This is a small personal experiment with $1 trades, not investment advice.** "
-         "A few days of wins says little: one loss at 85c wipes out about 6 wins, and results like these "
+         "A few days of wins says little: one loss at 85c wipes out about 6 wins (at 70c, about 2), and results like these "
          "can reverse at any time. Don't put in money you can't afford to lose.", "",
          f"_Updated {datetime.fromtimestamp(now, ET).strftime('%b %d, %I:%M %p').replace(' 0', ' ')} ET. "
          "Each row is one trade, added when the market settles._", "",
