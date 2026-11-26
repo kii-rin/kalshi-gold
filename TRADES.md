@@ -2,53 +2,15 @@
 
 > **This is a small personal experiment with $1 trades, not investment advice.** A few days of wins says little: one loss at 95c wipes out about 15 wins, and results like these can reverse at any time. Don't put in money you can't afford to lose.
 
-_Updated Nov 26, 8:15 AM ET. Each row is one trade, added when the market settles._
+_Updated Nov 26, 3:54 PM ET. Each row is one trade, added when the market settles. Started fresh Nov 26 with the 80-90c distance rule; earlier trades are in this file's history._
 
 | | Trades | Won | Lost | Win rate | Profit |
 |---|--:|--:|--:|--:|--:|
-| **Today** | 1 | 1 | 0 | 100% | **+$0.06** |
-| **All time** | 31 | 27 | 4 | 87% | **-$1.78** |
-
-## By day
-
-| Day | Trades | Won | Lost | Profit |
-|---|--:|--:|--:|--:|
-| Thu Nov 26 | 1 | 1 | 0 | +$0.06 |
-| Wed Nov 25 | 24 | 21 | 3 | -$1.44 |
-| Tue Nov 24 | 6 | 5 | 1 | -$0.40 |
+| **Today** | 0 | 0 | 0 | - | **+$0.00** |
+| **All time** | 0 | 0 | 0 | - | **+$0.00** |
 
 ## Trades (newest first)
 
 | Market closed (ET) | Bought | Price | Paid | Result | Profit |
 |---|---|--:|--:|---|--:|
-| Nov 26 8:15 AM | NO x1 | 94c | $0.94 | Won | +$0.06 |
-| Nov 25 8:30 PM | NO x1 | 91c | $0.91 | Won | +$0.09 |
-| Nov 25 6:30 PM | YES x1 | 95c | $0.95 | **Lost** | -$0.95 |
-| Nov 25 1:45 PM | NO x1 | 97c | $0.97 | Won | +$0.03 |
-| Nov 25 12:45 PM | YES x1 | 96c | $0.96 | Won | +$0.04 |
-| Nov 25 12:30 PM | YES x1 | 96c | $0.96 | Won | +$0.04 |
-| Nov 25 9:30 AM | NO x1 | 95c | $0.95 | Won | +$0.05 |
-| Nov 25 9:15 AM | YES x1 | 96c | $0.96 | Won | +$0.04 |
-| Nov 25 9:00 AM | NO x1 | 91c | $0.91 | **Lost** | -$0.91 |
-| Nov 25 8:30 AM | NO x1 | 96c | $0.96 | Won | +$0.04 |
-| Nov 25 8:15 AM | NO x1 | 94c | $0.94 | Won | +$0.06 |
-| Nov 25 8:00 AM | NO x1 | 94c | $0.94 | Won | +$0.06 |
-| Nov 25 6:30 AM | NO x1 | 97c | $0.97 | Won | +$0.03 |
-| Nov 25 5:45 AM | YES x1 | 85c | $0.85 | **Lost** | -$0.85 |
-| Nov 25 5:30 AM | NO x1 | 92c | $0.92 | Won | +$0.08 |
-| Nov 25 5:15 AM | YES x1 | 96c | $0.96 | Won | +$0.04 |
-| Nov 25 5:00 AM | YES x1 | 92c | $0.91 | Won | +$0.09 |
-| Nov 25 4:15 AM | NO x1 | 95c | $0.95 | Won | +$0.05 |
-| Nov 25 4:00 AM | NO x1 | 80c | $0.80 | Won | +$0.20 |
-| Nov 25 3:30 AM | YES x1 | 94c | $0.94 | Won | +$0.06 |
-| Nov 25 3:00 AM | YES x1 | 92c | $0.92 | Won | +$0.08 |
-| Nov 25 2:15 AM | YES x1 | 96c | $0.96 | Won | +$0.04 |
-| Nov 25 12:30 AM | NO x1 | 96c | $0.97 | Won | +$0.03 |
-| Nov 25 12:15 AM | NO x1 | 97c | $0.97 | Won | +$0.03 |
-| Nov 25 12:00 AM | YES x1 | 91c | $0.91 | Won | +$0.09 |
-| Nov 24 11:30 PM | YES x1 | 97c | $0.97 | Won | +$0.03 |
-| Nov 24 11:15 PM | NO x1 | 83c | $0.83 | **Lost** | -$0.83 |
-| Nov 24 11:00 PM | NO x1 | 83c | $0.83 | Won | +$0.17 |
-| Nov 24 10:00 PM | NO x1 | 93c | $0.93 | Won | +$0.07 |
-| Nov 24 9:00 PM | NO x1 | 95c | $0.95 | Won | +$0.05 |
-| Nov 24 7:45 PM | YES x1 | 89c | $0.89 | Won | +$0.11 |
+| no trades yet | | | | | |
