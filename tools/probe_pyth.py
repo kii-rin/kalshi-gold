@@ -1,26 +1,30 @@
-"""One-off check of Pyth endpoints for the gold price (live, at a past time, minute history)."""
-import json, time, urllib.parse, urllib.request
-ID = "7fd2c87083dd8fd5af2486a43f40b8e444acd77fda4e96263a53421cd079c387"   # Metal.Index.1OZGOLD/USD
-T = 1795453140   # Nov 23 2026 11:59 AM ET
+"""One-off check: does Coinbase PAXG-USD (tokenized gold) move with Kalshi's gold markets?"""
+import gzip, json, time, urllib.request
+from datetime import datetime, timezone
 def get(url):
-    try:
-        with urllib.request.urlopen(urllib.request.Request(url, headers={"User-Agent": "probe"}), timeout=20) as r:
-            return r.status, r.read().decode()[:700]
-    except Exception as e:
-        body = getattr(e, "read", lambda: b"")().decode()[:300] if hasattr(e, "read") else ""
-        return getattr(e, "code", "ERR"), f"{e} {body}"
-q = urllib.parse.quote
-urls = [
-    f"https://hermes.pyth.network/v2/updates/price/latest?ids%5B%5D={ID}&parsed=true&encoding=hex",
-    f"https://hermes.pyth.network/v2/updates/price/{T}?ids%5B%5D={ID}&parsed=true&encoding=hex",
-    f"https://benchmarks.pyth.network/v1/shims/tradingview/symbols?symbol={q('Metal.Index.1OZGOLD/USD')}",
-    f"https://benchmarks.pyth.network/v1/shims/tradingview/symbols?symbol={q('Metal.1OZGOLD/USD')}",
-    f"https://benchmarks.pyth.network/v1/shims/tradingview/history?symbol={q('Metal.Index.1OZGOLD/USD')}&resolution=1&from={T-600}&to={T}",
-    f"https://benchmarks.pyth.network/v1/shims/tradingview/history?symbol={q('Metal.1OZGOLD/USD')}&resolution=1&from={T-600}&to={T}",
-    f"https://benchmarks.pyth.network/v1/shims/tradingview/history?symbol={q('Metal.XAU/USD')}&resolution=1&from={T-600}&to={T}",
-    f"https://benchmarks.pyth.network/v1/updates/price/{T}?ids={ID}&parsed=true",
-]
-for u in urls:
-    s, b = get(u)
-    print(f"\n### {s} {u}\n{b}")
-    time.sleep(1)
+    with urllib.request.urlopen(urllib.request.Request(url, headers={"User-Agent": "probe"}), timeout=20) as r:
+        return json.loads(r.read().decode())
+ms = json.load(gzip.open("data/KXGOLD15M.json.gz", "rt"))
+ms = [m for m in ms if m["close"] > 1795000000][-300:]          # last ~3 days of markets
+iso = lambda t: datetime.fromtimestamp(t, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+closes = {}
+start, end = ms[0]["close"] - 1200, ms[-1]["close"]
+t = start
+while t < end:                                                  # 300 candles per request
+    rows = get(f"https://api.exchange.coinbase.com/products/PAXG-USD/candles?granularity=60&start={iso(t)}&end={iso(min(end, t + 18000))}")
+    for ts, lo, hi, op, cl, vol in rows:
+        closes[int(ts)] = cl                                    # candle start time -> close
+    t += 18000
+    time.sleep(0.4)
+print("PAXG candles:", len(closes))
+agree = total = flat = 0
+for m in ms:
+    o, c = closes.get(m["close"] - 900 - 60), closes.get(m["close"] - 60)   # closes of the minutes ending at open and at close
+    if o is None or c is None:
+        continue
+    if c == o:
+        flat += 1; continue
+    total += 1
+    agree += (c > o) == (m["result"] == "yes")
+print(f"markets compared: {total}, PAXG direction matched Kalshi result: {agree} ({agree / max(1, total) * 100:.1f}%), flat: {flat}")
+print("sample:", [(m["ticker"][-15:], m["result"], closes.get(m["close"] - 960), closes.get(m["close"] - 60)) for m in ms[-5:]])
