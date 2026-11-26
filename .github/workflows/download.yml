@@ -1,0 +1,52 @@
+name: Download market data
+
+# Downloads every minute of each settled 15-minute market for the listed series into data/<series>-full.json.gz.
+# Re-runs only fetch new markets.
+
+on:
+  workflow_dispatch:
+    inputs:
+      series:
+        description: "Kalshi series, comma separated"
+        default: "KXSILVER15M,KXEURUSD15M,KXGBPUSD15M,KXUSDJPY15M,KXCOPPER15M,KXNATGAS15M,KXWTI15M,KXPLATINUM15M,KXPALLADIUM15M"
+      start:
+        description: "Start date (YYYY-MM-DD)"
+        default: "2026-07-01"
+
+permissions:
+  contents: write
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      list: ${{ steps.p.outputs.list }}
+    steps:
+      - id: p
+        run: echo "list=$(echo '${{ inputs.series }}' | python3 -c 'import sys,json;print(json.dumps([s.strip() for s in sys.stdin.read().split(",") if s.strip()]))')" >> "$GITHUB_OUTPUT"
+  download:
+    needs: plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    strategy:
+      fail-fast: false
+      max-parallel: 3
+      matrix:
+        series: ${{ fromJson(needs.plan.outputs.list) }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Download ${{ matrix.series }}
+        run: python backtest.py --series "${{ matrix.series }}" --start "${{ inputs.start }}" --full
+      - name: Save
+        if: always()
+        run: |
+          git config user.name "data-download"
+          git config user.email "actions@users.noreply.github.com"
+          git add -f "data/${{ matrix.series }}-full.json.gz" 2>/dev/null || true
+          git diff --cached --quiet && exit 0
+          git commit -q -m "data: ${{ matrix.series }}"
+          for i in 1 2 3 4 5 6 7 8; do git pull --rebase -q && git push -q && exit 0; sleep $((RANDOM % 10 + 3)); done
+          exit 1
