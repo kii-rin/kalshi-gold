@@ -1,0 +1,21 @@
+name: Distance filter backtest (PAXG)
+on: workflow_dispatch
+permissions:
+  contents: write
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - run: python3 tools/paxg_backtest.py
+      - name: Save results
+        if: always()
+        run: |
+          git config user.name "gold-backtest"
+          git config user.email "actions@users.noreply.github.com"
+          git add -f PAXG_FILTER.md data/PAXG-USD-1m.json.gz 2>/dev/null || true
+          git diff --cached --quiet && exit 0
+          git commit -m "PAXG distance-filter backtest"
+          for i in 1 2 3 4 5; do git pull --rebase -q && git push -q && exit 0; sleep 5; done
+          exit 1
