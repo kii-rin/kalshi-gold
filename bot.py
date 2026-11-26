@@ -43,6 +43,7 @@ class Settings:
         self.poll = float(e("POLL_SECONDS", "3"))
         self.max_tries = int(e("MAX_TRIES_PER_MARKET", "3"))
         self.stable_seconds = float(e("STABLE_SECONDS", "30"))   # favorite must hold >= BAND_LOW this long
+        self.z_min = float(e("Z_MIN", "0"))          # >0: only buy if gold (PAXG) is this many typical moves from target
         self.key_id = e("KALSHI_API_KEY_ID")
         self.private_key = (e("KALSHI_PRIVATE_KEY") or "").replace("\\n", "\n")
         self.ntfy_topic = e("NTFY_TOPIC")                 # optional phone alerts via ntfy.sh
@@ -245,6 +246,69 @@ def fill_info(order, fallback_price):
     return filled, cost + fees
 
 
+# ------------------------------------------------------------------ gold price (Coinbase PAXG = tokenized gold)
+class GoldFeed:
+    """Live gold stand-in from Coinbase PAXG-USD (free, no key). Kalshi settles on Pyth gold, which needs a paid key;
+    we only use PAXG's move since the market opened, so its small premium over spot cancels out."""
+
+    def __init__(self, opener=None, clock=time.time):
+        self.opener = opener or self._get
+        self.clock = clock
+        self._candles, self._c_at = {}, 0.0
+        self._tick, self._t_at = None, 0.0
+
+    @staticmethod
+    def _get(url):
+        req = urllib.request.Request(url, headers={"User-Agent": "kalshi-gold-cloud-bot/1.0"})
+        with urllib.request.urlopen(req, timeout=10) as r:
+            return json.loads(r.read().decode())
+
+    def candles(self):
+        if self.clock() - self._c_at > 50:
+            rows = self.opener("https://api.exchange.coinbase.com/products/PAXG-USD/candles?granularity=60")
+            self._candles = {int(r[0]): float(r[4]) for r in rows}        # minute start -> close
+            self._c_at = self.clock()
+        return self._candles
+
+    def now(self):
+        if self.clock() - self._t_at > 2:
+            d = self.opener("https://api.exchange.coinbase.com/products/PAXG-USD/ticker")
+            self._tick = (float(d["price"]), parse_ts(d["time"]) if d.get("time") else self.clock())
+            self._t_at = self.clock()
+        return self._tick
+
+    def price_at(self, t, max_age=600):
+        """Close of the latest 1-minute candle that ended at or before t."""
+        c = self.candles()
+        m = int(t - 60 - (t - 60) % 60)
+        for back in range(0, max_age, 60):
+            if m - back in c:
+                return c[m - back]
+        return None
+
+    def speed(self, t, minutes=30):
+        vals = [self.price_at(t - 60 * i) for i in range(minutes + 1)]
+        vals = [v for v in vals if v is not None]
+        if len(vals) < 10:
+            return None
+        ch = [math.log(vals[i] / vals[i + 1]) for i in range(len(vals) - 1)]
+        mu = sum(ch) / len(ch)
+        return max(math.sqrt(sum((x - mu) ** 2 for x in ch) / len(ch)), 2e-5)
+
+    def distance(self, open_ts, close_ts, side, now):
+        """(ok, z, note): ok if PAXG has moved toward `side` since open by z typical moves for the time left."""
+        p_open = self.price_at(open_ts)
+        price, ts = self.now()
+        sd = self.speed(now)
+        if p_open is None or sd is None or price is None or now - ts > 120:
+            return False, 0.0, "no recent PAXG price"
+        move = math.log(price / p_open)
+        mins_left = max((close_ts - now) / 60, 0.25)
+        z = abs(move) / (sd * math.sqrt(mins_left))
+        agrees = move != 0 and (move > 0) == (side == "yes")
+        return agrees, z, f"PAXG {'+' if move >= 0 else ''}{move * 100:.3f}% since open, z={z:.2f}"
+
+
 # ------------------------------------------------------------------ trade log (TRADES.md in the repo)
 LOG_FIELDS = ["closed", "ticker", "side", "contracts", "price_c", "paid", "result", "profit", "note"]
 
@@ -382,6 +446,7 @@ class Bot:
         self.pending = {}            # ticker -> trade waiting for the market to settle
         self.hist = {}               # ticker -> [(time, favorite side, favorite price)] during the window
         self.tradelog = TradeLog(s.github_token, s.github_repo) if (s.github_token and s.github_repo) else None
+        self.gold = GoldFeed(clock=clock) if s.z_min > 0 else None
         self.day_pnl, self.day_w, self.day_l = 0.0, 0, 0
 
     def record(self, row):
@@ -461,6 +526,22 @@ class Bot:
                         log(f"{t}: {int(secs_left)}s left, waiting - {d['side'].upper()} at {d['price']:g}c "
                             f"but not steady for {self.s.stable_seconds:g}s (low {lo:g}c or the favorite flipped)")
                     continue
+                # distance-and-speed check: gold (PAXG) far enough from the target, on the favorite's side
+                dist_note = None
+                if self.gold:
+                    try:
+                        close_ts = parse_ts(m["close_time"])
+                        agrees, z, note = self.gold.distance(close_ts - 900, close_ts, d["side"], now)
+                    except Exception as e:
+                        agrees, z, note = False, 0.0, f"gold price unavailable ({e})"
+                    if not (agrees and z >= self.s.z_min):
+                        key = (t, "dist", round(z))
+                        if key not in self.logged:
+                            self.logged.add(key)
+                            why = "PAXG disagrees with the favorite" if not agrees else f"z below {self.s.z_min:g}"
+                            log(f"{t}: {int(secs_left)}s left, waiting - {d['side'].upper()} at {d['price']:g}c, {note} ({why})")
+                        continue
+                    dist_note = note
                 # fresh-price check from the live order book right before ordering
                 try:
                     ya2, na2 = self.k.book_asks(t)
@@ -471,6 +552,8 @@ class Bot:
                     action, d = "skip", {"why": f"couldn't re-check price ({e})", "secs_left": secs_left}
                 if action == "skip":
                     d["why"] = "price moved just before ordering: " + d.get("why", "")
+                else:
+                    d["note"] = dist_note
             if action == "wait":
                 continue
             if action == "skip":
@@ -511,7 +594,7 @@ class Bot:
                 self.done.add(t)
                 self.spent += spent
                 log(f"BOUGHT {t}: {d['side'].upper()} {filled:g} contracts for ${spent:.2f} "
-                    f"(saw {d['price']:g}c, {int(secs_left)}s left)")
+                    f"(saw {d['price']:g}c, {int(secs_left)}s left){' - ' + d['note'] if d.get('note') else ''}")
                 self.pending[t] = {"side": d["side"], "n": filled, "cost": spent,
                                    "close": parse_ts(m["close_time"]), "checks": 0}
             else:

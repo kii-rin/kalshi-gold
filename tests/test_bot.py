@@ -385,3 +385,68 @@ def test_limit_capped_at_95():
     a, d = bot.decide(mkt("A", 60, yes_ask=94.5, no_ask=6), settings(BAND_LOW=90, BAND_HIGH=95), NOW)
     assert a == "buy" and d["limit"] == 95
     assert bot.decide(mkt("B", 60, yes_ask=96, no_ask=5), settings(BAND_LOW=90, BAND_HIGH=95), NOW)[0] == "skip"
+
+
+class FakeCoinbase:
+    """PAXG minute candles every minute from t0, price path given by f(minute_start)."""
+
+    def __init__(self, f, t_end, live):
+        self.f, self.t_end, self.live = f, t_end, live
+
+    def __call__(self, url):
+        if url.endswith("/ticker"):
+            return {"price": str(self.live), "time": iso(self.t_end)}
+        end = int(self.t_end - self.t_end % 60)
+        return [[t, 0, 0, 0, self.f(t), 1] for t in range(end - 300 * 60, end, 60)]
+
+
+def gold_bot(markets, price_path, live, z_min=1, now=None):
+    now = now or NOW
+    k = FakeKalshi(markets)
+    b = bot.Bot(settings(LIVE="true", KALSHI_API_KEY_ID="x", KALSHI_PRIVATE_KEY="y", BAND_LOW=80, BAND_HIGH=90,
+                         START_SECONDS=180, STABLE_SECONDS=0, Z_MIN=z_min), k, clock=lambda: now)
+    b.gold = bot.GoldFeed(opener=FakeCoinbase(price_path, now, live), clock=lambda: now)
+    return b, k
+
+
+def wiggle(t):          # small up/down noise around 3500 -> typical 1-min move ~0.01%
+    return 3500 * (1 + 0.0001 * (1 if (t // 60) % 2 else -1))
+
+
+def test_buys_when_far_from_target_on_favorite_side():
+    close = NOW + 150
+    m = mkt("A", 150, yes_ask=86, no_ask=15)
+    m["close_time"] = iso(close)
+    b, k = gold_bot([m], wiggle, live=3500 * 1.002)        # +0.2% since open: many typical moves up
+    b.step()
+    assert k.orders and k.orders[0][1] == "yes"
+
+
+def test_skips_when_close_to_target():
+    m = mkt("A", 150, yes_ask=86, no_ask=15)
+    b, k = gold_bot([m], wiggle, live=3500 * 1.00005)      # barely above the target
+    b.step()
+    assert k.orders == []
+
+
+def test_skips_when_gold_points_the_other_way():
+    m = mkt("A", 150, yes_ask=86, no_ask=15)               # YES favorite...
+    b, k = gold_bot([m], wiggle, live=3500 * 0.998)        # ...but PAXG is well below the target
+    b.step()
+    assert k.orders == []
+
+
+def test_no_buy_without_recent_gold_price():
+    m = mkt("A", 150, yes_ask=86, no_ask=15)
+    b, k = gold_bot([m], wiggle, live=3500 * 1.002)
+    b.gold.opener = lambda url: (_ for _ in ()).throw(RuntimeError("down"))
+    b.gold._c_at = b.gold._t_at = -1e9
+    b.step()
+    assert k.orders == []
+
+
+def test_band_80_90_only():
+    m = mkt("A", 150, yes_ask=93, no_ask=8)                # 93c is outside 80-90
+    b, k = gold_bot([m], wiggle, live=3500 * 1.002)
+    b.step()
+    assert k.orders == []

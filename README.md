@@ -2,7 +2,7 @@
 
 Runs all day on a cloud server, so no PC needed.
 
-**Rule:** in the last 2 minutes before each 15-minute gold market closes, if the favorite costs **90–95¢** and has stayed the favorite at 90¢+ for the minute before, buy it once and hold until it settles. This was the best version in a backtest of 7,800+ markets (see BACKTEST.md). Even so, it only roughly broke even, so treat this as a learning test.
+**Rule:** in the last 3 minutes before each 15-minute gold market closes, buy the favorite at **80–90¢**, but only when gold is far from the target, judged by its recent speed. Gold here is Coinbase PAXG, a token backed by gold, used because Pyth's own feed needs a paid key. The bot buys only if PAXG has moved toward the favorite's side since the market opened, by at least `Z_MIN` typical moves for the time left. See PAXG_FILTER.md for the backtest.
 
 It starts in **paper mode**: it only logs what it *would* buy. Nothing real happens until you set `LIVE=true`.
 
@@ -54,9 +54,10 @@ Once the paper trades look right (give it a day or so), change `LIVE` to `true`.
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `BAND_LOW` / `BAND_HIGH` | `90` / `95` (GitHub) | Price band in cents |
-| `START_SECONDS` | `120` (GitHub) | Only buy in the last this-many seconds |
-| `STABLE_SECONDS` | `60` (GitHub) | Favorite must have stayed at or above `BAND_LOW` this long before buying |
+| `BAND_LOW` / `BAND_HIGH` | `80` / `90` (GitHub) | Price band in cents |
+| `START_SECONDS` | `180` (GitHub) | Only buy in the last this-many seconds |
+| `Z_MIN` | `1` (GitHub) | Minimum distance from the target, in typical gold moves for the time left (`0` = off) |
+| `STABLE_SECONDS` | `0` (GitHub) | Favorite must have stayed at or above `BAND_LOW` this long before buying |
 | `DOLLARS_PER_TRADE` | `2` | Buys whole contracts ($2 at 93¢ = 2 contracts) |
 | `DAILY_LIMIT` | `20` | Max dollars spent per day (Eastern time). `0` = no limit |
 | `SLIPPAGE_CENTS` | `1` | May pay up to this much above the price it saw, but never above `BAND_HIGH` |
