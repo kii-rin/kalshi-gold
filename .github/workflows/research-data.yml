@@ -1,0 +1,21 @@
+name: Research data (gold)
+on: workflow_dispatch
+permissions:
+  contents: write
+jobs:
+  get:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - run: python3 research/get_data.py
+      - name: Save
+        if: always()
+        run: |
+          git config user.name "research-data"
+          git config user.email "actions@users.noreply.github.com"
+          git add -f data/XAUT-USDT-1m.json.gz data/KXGOLD15M-pyth.json.gz 2>/dev/null || true
+          git diff --cached --quiet && exit 0
+          git commit -q -m "research data: XAUT 1m + Kalshi gold Pyth targets"
+          for i in 1 2 3 4 5; do git pull --rebase -q && git push -q && exit 0; sleep 5; done
+          exit 1
