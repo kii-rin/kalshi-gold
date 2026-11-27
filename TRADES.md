@@ -2,17 +2,18 @@
 
 > **This is a small personal experiment with $1 trades, not investment advice.** A few days of wins says little: one loss at 85c wipes out about 6 wins (at 70c, about 2), and results like these can reverse at any time. Don't put in money you can't afford to lose.
 
-_Updated Nov 26, 7:30 PM ET. Each row is one trade, added when the market settles._
+_Updated Nov 26, 8:45 PM ET. Each row is one trade, added when the market settles._
 
 | | Trades | Won | Lost | Win rate | Profit |
 |---|--:|--:|--:|--:|--:|
-| **Today** | 4 | 3 | 1 | 75% | **-$0.55** |
-| **All time** | 4 | 3 | 1 | 75% | **-$0.55** |
+| **Today** | 5 | 4 | 1 | 80% | **-$0.46** |
+| **All time** | 5 | 4 | 1 | 80% | **-$0.46** |
 
 ## Trades (newest first)
 
 | Market closed (ET) | Bought | Price | Paid | Result | Profit |
 |---|---|--:|--:|---|--:|
+| Nov 26 8:45 PM | NO x1 | 91c | $0.91 | Won | +$0.09 |
 | Nov 26 7:30 PM | YES x1 | 86c | $0.86 | **Lost** | -$0.86 |
 | Nov 26 7:15 PM | NO x1 | 85c | $0.85 | Won | +$0.15 |
 | Nov 26 6:45 PM | YES x1 | 91c | $0.91 | Won | +$0.09 |
