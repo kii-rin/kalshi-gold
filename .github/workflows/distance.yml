@@ -1,0 +1,43 @@
+name: Distance filter backtest
+
+# For each "SERIES:COINBASE-PRODUCT" pair: downloads the Coinbase 1-minute price and tests the distance rule.
+on:
+  workflow_dispatch:
+    inputs:
+      pairs:
+        description: "SERIES:PRODUCT pairs, comma separated"
+        default: "KXBTC15M:BTC-USD,KXETH15M:ETH-USD,KXSOL15M:SOL-USD,KXXRP15M:XRP-USD,KXDOGE15M:DOGE-USD"
+
+permissions:
+  contents: write
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      list: ${{ steps.p.outputs.list }}
+    steps:
+      - id: p
+        run: echo "list=$(echo '${{ inputs.pairs }}' | python3 -c 'import sys,json;print(json.dumps([dict(zip(("series","product"),p.strip().split(":"))) for p in sys.stdin.read().split(",") if p.strip()]))')" >> "$GITHUB_OUTPUT"
+  run:
+    needs: plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    strategy:
+      fail-fast: false
+      max-parallel: 3
+      matrix:
+        pair: ${{ fromJson(needs.plan.outputs.list) }}
+    steps:
+      - uses: actions/checkout@v4
+      - run: python3 tools/distance_backtest.py --series "${{ matrix.pair.series }}" --product "${{ matrix.pair.product }}"
+      - name: Save
+        if: always()
+        run: |
+          git config user.name "distance-backtest"
+          git config user.email "actions@users.noreply.github.com"
+          git add -f results/ "data/${{ matrix.pair.product }}-1m.json.gz" 2>/dev/null || true
+          git diff --cached --quiet && exit 0
+          git commit -q -m "distance backtest: ${{ matrix.pair.series }}"
+          for i in 1 2 3 4 5 6 7 8; do git pull --rebase -q && git push -q && exit 0; sleep $((RANDOM % 10 + 3)); done
+          exit 1
