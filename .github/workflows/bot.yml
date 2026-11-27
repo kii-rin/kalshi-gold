@@ -1,8 +1,7 @@
 name: Gold bot (test run)
 
-# Runs the bot for up to ~5h50m per run (GitHub's limit is 6h per job).
-# A scheduled start every hour keeps one run waiting in line, so when a run ends the
-# next starts right away. To stop the restarts: add the repo variable BOT_ENABLED = false
+# Runs the bot for ~5h40m per run (GitHub's limit is 6h per job). Just before a run ends it
+# starts the next one, so there's no gap; the hourly schedule is only a backup. To stop the restarts: add the repo variable BOT_ENABLED = false
 # (or Actions -> Gold bot -> "..." -> Disable workflow), then cancel the running run.
 
 on:
@@ -20,6 +19,7 @@ concurrency:
 
 permissions:
   contents: write   # the bot updates TRADES.md (trade log) in this repo
+  actions: write    # each run starts the next one, so there's no gap between runs
 
 jobs:
   run:
@@ -46,5 +46,11 @@ jobs:
           Z_MIN: ${{ vars.Z_MIN || '1' }}
           NTFY_TOPIC: ${{ vars.NTFY_TOPIC }}
           GITHUB_TOKEN: ${{ github.token }}
-          RUN_MINUTES: ${{ github.event.inputs.minutes || '350' }}
+          RUN_MINUTES: ${{ github.event.inputs.minutes || '340' }}
         run: python bot.py
+      - name: Start the next run
+        # runs when the bot finished or crashed, not when someone cancelled the run (cancel = stop)
+        if: (success() || failure()) && vars.BOT_ENABLED != 'false'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run bot.yml --repo "${{ github.repository }}" -f minutes=340
