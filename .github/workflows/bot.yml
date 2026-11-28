@@ -1,8 +1,9 @@
 name: Gold bot (test run)
 
 # Runs the bot for ~5h40m per run (GitHub's limit is 6h per job). Just before a run ends it
-# starts the next one, so there's no gap; the hourly schedule is only a backup. To stop the restarts: add the repo variable BOT_ENABLED = false
-# (or Actions -> Gold bot -> "..." -> Disable workflow), then cancel the running run.
+# starts the next one, so there's no gap. The hourly schedule is only a backup: it checks first
+# and does nothing if a bot run is already running or waiting.
+# To stop: add the repo variable BOT_ENABLED = false, then cancel the running run.
 
 on:
   workflow_dispatch:
@@ -13,17 +14,35 @@ on:
   schedule:
     - cron: "57 * * * *"
 
-concurrency:
-  group: gold-bot
-  cancel-in-progress: false
-
 permissions:
   contents: write   # the bot updates TRADES.md (trade log) in this repo
   actions: write    # each run starts the next one, so there's no gap between runs
 
 jobs:
+  check:
+    # backup start only: skip if another bot run is already running or queued
+    runs-on: ubuntu-latest
+    outputs:
+      busy: ${{ steps.c.outputs.busy }}
+    steps:
+      - id: c
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ "${{ github.event_name }}" != "schedule" ]; then echo "busy=false" >> "$GITHUB_OUTPUT"; exit 0; fi
+          n=0
+          for st in in_progress queued waiting pending; do
+            k=$(gh api "repos/${{ github.repository }}/actions/workflows/bot.yml/runs?status=$st" --jq "[.workflow_runs[] | select(.id != ${{ github.run_id }})] | length")
+            n=$((n + k))
+          done
+          echo "other bot runs: $n"
+          if [ "$n" -gt 0 ]; then echo "busy=true" >> "$GITHUB_OUTPUT"; else echo "busy=false" >> "$GITHUB_OUTPUT"; fi
   run:
-    if: github.event_name == 'workflow_dispatch' || vars.BOT_ENABLED != 'false'
+    needs: check
+    if: needs.check.outputs.busy != 'true' && (github.event_name == 'workflow_dispatch' || vars.BOT_ENABLED != 'false')
+    concurrency:
+      group: gold-bot
+      cancel-in-progress: false
     runs-on: ubuntu-latest
     timeout-minutes: 358
     steps:
